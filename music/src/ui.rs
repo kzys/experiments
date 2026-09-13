@@ -339,17 +339,26 @@ impl App {
                     });
                     draw_log_panel(ctx, &log_lines);
                     egui::CentralPanel::default().show(ctx, |ui| {
-                        egui::ScrollArea::vertical().auto_shrink([false, false]).show(ui, |ui| {
-                            if names.is_empty() {
-                                ui.weak("(empty)");
-                            }
-                            for (idx, name) in names.iter().enumerate() {
-                                let resp = ui.selectable_label(idx == selected, name);
-                                if idx == selected {
-                                    resp.scroll_to_me(Some(egui::Align::Center));
+                        // Salted by title (unique per level: "Albums", or
+                        // each album's own name), so each list keeps its
+                        // own scroll offset — otherwise Albums and Tracks
+                        // share one ScrollArea's persisted offset, and
+                        // going Back visibly re-scrolls to catch up with
+                        // wherever the revealed list's selection actually is.
+                        egui::ScrollArea::vertical().id_salt(&title).auto_shrink([false, false]).show(
+                            ui,
+                            |ui| {
+                                if names.is_empty() {
+                                    ui.weak("(empty)");
                                 }
-                            }
-                        });
+                                for (idx, name) in names.iter().enumerate() {
+                                    let resp = ui.selectable_label(idx == selected, name);
+                                    if idx == selected {
+                                        resp.scroll_to_me(Some(egui::Align::Center));
+                                    }
+                                }
+                            },
+                        );
                     });
                 });
             }
