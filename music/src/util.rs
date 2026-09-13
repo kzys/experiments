@@ -10,15 +10,28 @@ pub fn die(msg: &str) -> ! {
 
 // How many recent lines the on-screen log panel shows (see ui.rs); older
 // ones still make it to stderr and the log file, just not the screen.
-const VISIBLE_LINES: usize = 6;
+const VISIBLE_LINES: usize = 2;
 
-static RECENT: Mutex<VecDeque<String>> = Mutex::new(VecDeque::new());
+static RECENT: Mutex<VecDeque<(log::Level, String)>> = Mutex::new(VecDeque::new());
 
 // A snapshot of the last few log lines, for ui.rs to paint on screen —
 // there's no other way to see what's going wrong on a kiosk device with no
-// console attached.
-pub fn recent_lines() -> Vec<String> {
+// console attached. The level rides along so warnings and errors can be
+// colored differently from routine info lines.
+pub fn recent_lines() -> Vec<(log::Level, String)> {
     RECENT.lock().unwrap().iter().cloned().collect()
+}
+
+// Wall-clock HH:MM:SS in the local timezone: what a person reading the
+// on-screen panel can relate to, unlike raw epoch seconds.
+fn timestamp() -> String {
+    let secs = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_secs() as libc::time_t)
+        .unwrap_or(0);
+    let mut tm: libc::tm = unsafe { std::mem::zeroed() };
+    unsafe { libc::localtime_r(&secs, &mut tm) };
+    format!("{:02}:{:02}:{:02}", tm.tm_hour, tm.tm_min, tm.tm_sec)
 }
 
 // Launched as an EmulationStation Ports script, this has no console for
@@ -36,15 +49,11 @@ impl log::Log for FileLogger {
     }
 
     fn log(&self, record: &log::Record) {
-        let secs = std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)
-            .map(|d| d.as_secs())
-            .unwrap_or(0);
-        let line = format!("[{secs}] {} {}", record.level(), record.args());
+        let line = format!("[{}] {} {}", timestamp(), record.level(), record.args());
         eprintln!("{line}");
 
         let mut recent = RECENT.lock().unwrap();
-        recent.push_back(line.clone());
+        recent.push_back((record.level(), line.clone()));
         while recent.len() > VISIBLE_LINES {
             recent.pop_front();
         }

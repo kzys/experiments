@@ -19,8 +19,9 @@ struct Args {
 fn usage() -> ! {
     eprintln!(
         "usage: music [-s server] [-u username] [-p password]\n  \
-         -s must be given (or $JELLYFIN_SERVER); -u/-p fall back to\n  \
-         $JELLYFIN_USER/$JELLYFIN_PASSWORD, then to a prompt (password hidden)."
+         -s falls back to $JELLYFIN_SERVER, then to on-screen entry; -u/-p\n  \
+         fall back to $JELLYFIN_USER/$JELLYFIN_PASSWORD, then to a prompt\n  \
+         (password hidden)."
     );
     std::process::exit(2);
 }
@@ -40,7 +41,9 @@ fn parse_args() -> Args {
         }
     }
 
-    let server = server.unwrap_or_else(|| usage()).trim_end_matches('/').to_string();
+    // Empty means "not set": the UI opens on the server-address screen and
+    // asks for one there (see ui.rs) rather than refusing to start.
+    let server = server.unwrap_or_default().trim_end_matches('/').to_string();
     Args { server, username, password }
 }
 
@@ -50,7 +53,8 @@ fn main() {
     let username = args.username.unwrap_or_else(|| util::prompt_line("username: "));
     let password = args.password.unwrap_or_else(|| util::prompt_password("password: "));
 
-    log::info!("starting: server={} user={username}", args.server);
+    let shown_server = if args.server.is_empty() { "(unset)" } else { args.server.as_str() };
+    log::info!("starting: server={shown_server} user={username}");
 
     // The actual connection attempt happens inside ui::run, once a surface
     // exists to show a failure on — this device is on a flaky WiFi link,

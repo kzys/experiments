@@ -23,9 +23,6 @@ use crate::browse::Browser;
 use crate::pad::{self, NavEvent};
 use crate::util::die;
 
-const LEGEND: &str = "A: select   B: back   Select: quit";
-const ERROR_LEGEND: &str = "A: edit server   Select: quit";
-const EDITING_LEGEND: &str = "close lowkey (Select) when done typing";
 
 // Same install location music itself ends up at (see Makefile); spawned by
 // absolute path since rocknix/Music.sh execs us with no guarantee that
@@ -183,13 +180,242 @@ fn load_fonts() -> egui::FontDefinitions {
     fonts.families.insert(egui::FontFamily::Monospace, vec!["Rubik".to_owned(), "CJK".to_owned()]);
     fonts
 }
+// ---- Theme -----------------------------------------------------------------
+//
+// Sizes and colors follow the design mockups, which were drawn at 800×600.
+// The device's panel is 640×480 — exactly 0.8× — so rather than scaling every
+// number by hand, the mockup values are used verbatim as logical points and
+// the whole UI is zoomed by ZOOM.
+
+const ZOOM: f32 = 0.8;
+
+const BG: egui::Color32 = egui::Color32::from_rgb(0x1b, 0x1b, 0x1b);
+const LINE: egui::Color32 = egui::Color32::from_rgba_premultiplied(20, 20, 20, 20); // white @ 8%
+const TEXT: egui::Color32 = egui::Color32::from_rgb(0xdc, 0xdc, 0xdc);
+const WEAK: egui::Color32 = egui::Color32::from_rgb(0x8c, 0x8c, 0x8c);
+const DIM: egui::Color32 = egui::Color32::from_rgb(0x5c, 0x5c, 0x5c);
+const DIMMER: egui::Color32 = egui::Color32::from_rgb(0x4a, 0x4a, 0x4a);
+const SEL_BG: egui::Color32 = egui::Color32::from_rgb(0x0f, 0x5a, 0x80);
+const SEL_BORDER: egui::Color32 = egui::Color32::from_rgb(0x4f, 0xb0, 0xe0);
+const SEL_WEAK: egui::Color32 = egui::Color32::from_rgb(0xcf, 0xe9, 0xf7);
+const FIELD_BG: egui::Color32 = egui::Color32::from_rgb(0x23, 0x23, 0x23);
+const LOG_WARN: egui::Color32 = egui::Color32::from_rgb(0xd0, 0xa0, 0x30);
+const LOG_ERROR: egui::Color32 = egui::Color32::from_rgb(0xe0, 0x5a, 0x5a);
+
+const FS_LG: f32 = 30.0;
+const FS_MD: f32 = 20.0;
+const SIDE: i8 = 32; // horizontal padding of every panel
+// Space left of the list for the play marker, which sits outside the row.
+const GUTTER: f32 = 23.0;
+
+const LEGEND_ALBUMS: &str = "A: select   B: back   Select: quit";
+const LEGEND_TRACKS: &str = "A: select   B: back   X: play/pause   L1/R1: skip   Select: quit";
+const LEGEND_ERROR: &str = "A: edit server   Select: quit";
+const LEGEND_ADDRESS: &str = "A: edit address   Select: quit";
+const LEGEND_EDITING: &str = "close lowkey (Select) when done typing";
+
+fn body_font() -> egui::FontId {
+    egui::FontId::proportional(FS_MD)
+}
+
+fn apply_theme(ctx: &egui::Context) {
+    use egui::{FontFamily::Proportional, FontId, TextStyle};
+
+    ctx.set_zoom_factor(ZOOM);
+    ctx.all_styles_mut(|style| {
+        style.text_styles = [
+            (TextStyle::Heading, FontId::new(FS_LG, Proportional)),
+            (TextStyle::Body, FontId::new(FS_MD, Proportional)),
+            (TextStyle::Button, FontId::new(FS_MD, Proportional)),
+            (TextStyle::Small, FontId::new(FS_MD, Proportional)),
+            (TextStyle::Monospace, FontId::new(FS_MD, Proportional)),
+        ]
+        .into();
+        let v = &mut style.visuals;
+        *v = egui::Visuals::dark();
+        v.panel_fill = BG;
+        v.window_fill = BG;
+        v.extreme_bg_color = FIELD_BG;
+        v.override_text_color = Some(TEXT);
+        v.weak_text_color = Some(WEAK);
+        v.selection.bg_fill = SEL_BG;
+        v.selection.stroke = egui::Stroke::new(1.0, SEL_BORDER);
+        // Panel separator lines and the text field's resting border.
+        v.widgets.noninteractive.bg_stroke = egui::Stroke::new(1.0, LINE);
+        v.widgets.inactive.bg_stroke = egui::Stroke::new(1.0, LINE);
+        v.widgets.inactive.corner_radius = 2.0.into();
+        // Disabled widgets keep their explicit colors instead of fading; the
+        // text field's color is chosen per screen below.
+        v.disabled_alpha = 1.0;
+    });
+}
+
+fn panel_frame(top: i8, bottom: i8) -> egui::Frame {
+    egui::Frame::new().fill(BG).inner_margin(egui::Margin { left: SIDE, right: SIDE, top, bottom })
+}
+
+fn draw_title(ui: &mut egui::Ui, title: &str) {
+    egui::Panel::top("title").frame(panel_frame(14, 12)).show(ui, |ui| {
+        ui.heading(title);
+    });
+}
+
+fn draw_legend(ui: &mut egui::Ui, legend: &str) {
+    egui::Panel::bottom("legend").frame(panel_frame(8, 12)).show(ui, |ui| {
+        ui.weak(legend);
+    });
+}
+
+// A handful of the most recent log lines (see util.rs), always visible: the
+// only way to see what's going wrong on a kiosk device with no console.
+fn draw_log_panel(ui: &mut egui::Ui, lines: &[(log::Level, String)]) {
+    if lines.is_empty() {
+        return;
+    }
+    egui::Panel::bottom("log").frame(panel_frame(6, 4)).show(ui, |ui| {
+        ui.spacing_mut().item_spacing.y = 4.0;
+        for (level, line) in lines {
+            let color = match level {
+                log::Level::Error => LOG_ERROR,
+                log::Level::Warn => LOG_WARN,
+                _ => DIM,
+            };
+            ui.add(egui::Label::new(egui::RichText::new(line).color(color)).truncate());
+        }
+    });
+}
+
+// The server address field shared by the address and error screens. Only
+// editable while lowkey is up (see start_editing); otherwise shown inert,
+// in the screen's chosen text color.
+fn draw_server_field(ui: &mut egui::Ui, server: &mut String, editing: bool, color: egui::Color32) {
+    let field = egui::TextEdit::singleline(server)
+        .id(server_field_id())
+        .font(body_font())
+        .text_color(color)
+        .background_color(FIELD_BG)
+        .margin(egui::Margin::symmetric(10, 8))
+        .desired_width(440.0)
+        .hint_text(egui::RichText::new("not set").italics().color(DIMMER));
+    ui.add_enabled(editing, field);
+}
+
+// What the list rows show at their left edge: nothing, or the marker for
+// the track that's currently playing / paused.
+#[derive(Clone, Copy)]
+enum Marker {
+    Playing,
+    Paused,
+}
+
+fn draw_marker(painter: &egui::Painter, center: egui::Pos2, marker: Marker) {
+    let s = 7.0; // half the marker's 14px box
+    match marker {
+        Marker::Playing => {
+            let pts = vec![
+                egui::pos2(center.x - s + 1.5, center.y - s + 1.0),
+                egui::pos2(center.x + s - 1.0, center.y),
+                egui::pos2(center.x - s + 1.5, center.y + s - 1.0),
+            ];
+            painter.add(egui::Shape::convex_polygon(pts, SEL_BORDER, egui::Stroke::NONE));
+        }
+        Marker::Paused => {
+            for dx in [-4.5, 1.5] {
+                let r = egui::Rect::from_min_size(
+                    egui::pos2(center.x + dx, center.y - s + 1.0),
+                    egui::vec2(3.0, 2.0 * s - 2.0),
+                );
+                painter.rect_filled(r, 0.0, SEL_BORDER);
+            }
+        }
+    }
+}
+
+// One list row: `left` text, `right` (count or duration) flush to the right
+// edge in the weak color, and the selection box when selected. The row spans
+// the full list width; the marker gutter to its left is outside the box.
+fn draw_row(
+    ui: &mut egui::Ui,
+    selected: bool,
+    left: &str,
+    right: &str,
+    marker: Option<Marker>,
+) -> egui::Response {
+    let font = body_font();
+    let pad_y = 6.0;
+    let row_h = ui.painter().fonts_mut(|f| f.row_height(&font)) + 2.0 * pad_y;
+    let (rect, resp) = ui.allocate_exact_size(egui::vec2(ui.available_width(), row_h), egui::Sense::hover());
+    let painter = ui.painter();
+    let box_rect = egui::Rect::from_min_max(egui::pos2(rect.left() + GUTTER, rect.top()), rect.max);
+
+    if selected {
+        painter.rect(box_rect, 3.0, SEL_BG, egui::Stroke::new(1.0, SEL_BORDER), egui::StrokeKind::Inside);
+    }
+    if let Some(marker) = marker {
+        draw_marker(painter, egui::pos2(rect.left() + GUTTER / 2.0, rect.center().y), marker);
+    }
+
+    let right_color = if selected { SEL_WEAK } else { WEAK };
+    let right_galley = painter.layout_no_wrap(right.to_owned(), font.clone(), right_color);
+    let right_x = box_rect.right() - 12.0 - right_galley.size().x;
+    painter.galley(
+        egui::pos2(right_x, rect.center().y - right_galley.size().y / 2.0),
+        right_galley,
+        right_color,
+    );
+
+    let mut job = egui::text::LayoutJob::simple_singleline(left.to_owned(), font, TEXT);
+    job.wrap = egui::text::TextWrapping::truncate_at_width(right_x - 16.0 - box_rect.left());
+    let left_galley = painter.layout_job(job);
+    painter.galley(
+        egui::pos2(box_rect.left(), rect.center().y - left_galley.size().y / 2.0),
+        left_galley,
+        TEXT,
+    );
+    resp
+}
+
+fn fmt_duration(secs: u64) -> String {
+    format!("{}:{:02}", secs / 60, secs % 60)
+}
+
+// ---- Playback ----------------------------------------------------------------
+
+// What's playing right now. Carries its own copy of the album's track list
+// so L1/R1 can step through it regardless of where the browser has moved
+// since — backing out to Albums doesn't lose the skip targets.
+struct Playing {
+    tracks: Vec<Item>,
+    index: usize,
+    started: std::time::Instant,
+    // Time played before the current pause/resume cycle.
+    played: std::time::Duration,
+    paused: bool,
+}
+
+impl Playing {
+    fn item(&self) -> &Item {
+        &self.tracks[self.index]
+    }
+
+    // Approximate: time since mpv was spawned, minus pauses. Doesn't know
+    // about buffering, and is only refreshed when something else triggers a
+    // redraw. Reading mpv's real position needs its JSON IPC — see TODO.md.
+    fn position(&self) -> std::time::Duration {
+        if self.paused { self.played } else { self.played + self.started.elapsed() }
+    }
+
+    fn marker(&self) -> Marker {
+        if self.paused { Marker::Paused } else { Marker::Playing }
+    }
+}
 
 // Spawns mpv on the item's stream URL and returns immediately — mpv keeps
 // playing in the background while the event loop (gamepad input included)
 // stays responsive. Failure to spawn is logged, not fatal: a bad track
-// shouldn't take down the browser. Full transport control (pause/skip/
-// volume over mpv's JSON IPC) is still PLAN.md's playback-control step; this
-// just stops playback from freezing the UI.
+// shouldn't take down the browser. Driving one long-lived mpv over its
+// JSON IPC instead is still PLAN.md's playback-control step (see TODO.md);
+// this just stops playback from freezing the UI.
 fn play(browser: &Browser, item: &Item) -> Option<std::process::Child> {
     let url = browser.stream_url(&item.id);
     log::info!("playing {} ({})", item.name, item.id);
@@ -202,14 +428,25 @@ fn play(browser: &Browser, item: &Item) -> Option<std::process::Child> {
     }
 }
 
-// Either browsing normally, or a request failed and there's nothing to
-// browse — most likely the server being unreachable over a flaky WiFi
-// link, which is routine enough here that it needs an on-screen message
-// instead of the process just dying with nothing visible on the kiosk's
-// screen.
+// Stops whatever's currently playing, if anything, so starting a new track
+// doesn't leave the old one's audio running underneath it.
+fn stop_playback(mpv: &mut Option<std::process::Child>) {
+    if let Some(mut child) = mpv.take() {
+        child.kill().ok();
+        child.wait().ok();
+    }
+}
+
+// ---- App ---------------------------------------------------------------------
+
+// Browsing normally; a request failed and there's nothing to browse — most
+// likely the server being unreachable over a flaky WiFi link, routine enough
+// here to need an on-screen message instead of the process just dying with
+// nothing visible; or no server address configured at all yet.
 enum State {
     Browsing(Browser),
     Error(String),
+    ServerAddress,
 }
 
 struct App {
@@ -221,15 +458,19 @@ struct App {
     password: String,
     state: Option<State>,
     mpv: Option<std::process::Child>,
+    playing: Option<Playing>,
     pad: Arc<EvdevHandle<File>>,
     proxy: winit::event_loop::EventLoopProxy<AppEvent>,
     // Whether lowkey is currently up editing the server address. Only ever
-    // set from the Error screen's "A: edit server" gesture; cleared when
+    // set from the address/error screens' "A: edit" gesture; cleared when
     // lowkey's process exits (see AppEvent::LowkeyExited).
     editing: bool,
 }
 
 fn connect(server: &str, username: &str, password: &str) -> State {
+    if server.is_empty() {
+        return State::ServerAddress;
+    }
     match api::authenticate(server, username, password).and_then(Browser::new) {
         Ok(browser) => {
             log::info!("authenticated, browsing");
@@ -275,84 +516,153 @@ fn start_editing(pad: &Arc<EvdevHandle<File>>, proxy: &winit::event_loop::EventL
     true
 }
 
-// Stops whatever's currently playing, if anything, so starting a new track
-// doesn't leave the old one's audio running underneath it.
-fn stop_playback(mpv: &mut Option<std::process::Child>) {
-    if let Some(mut child) = mpv.take() {
-        child.kill().ok();
-        child.wait().ok();
-    }
-}
-
-// A handful of the most recent log lines (see util.rs), always visible: the
-// only way to see what's going wrong on a kiosk device with no console.
-fn draw_log_panel(ui: &mut egui::Ui, lines: &[String]) {
-    if lines.is_empty() {
-        return;
-    }
-    egui::Panel::bottom("log").show(ui, |ui| {
-        for line in lines {
-            ui.small(line);
-        }
-    });
-}
-
 impl App {
+    // Forgets a track whose mpv has already exited (played to the end, or
+    // died), so the list stops showing it as playing.
+    fn reap_mpv(&mut self) {
+        if let Some(child) = self.mpv.as_mut()
+            && matches!(child.try_wait(), Ok(Some(_)) | Err(_))
+        {
+            self.mpv = None;
+            self.playing = None;
+        }
+    }
+
+    fn start_track(&mut self, tracks: Vec<Item>, index: usize) {
+        let Some(State::Browsing(browser)) = self.state.as_ref() else { return };
+        stop_playback(&mut self.mpv);
+        self.mpv = play(browser, &tracks[index]);
+        self.playing = self.mpv.as_ref().map(|_| Playing {
+            tracks,
+            index,
+            started: std::time::Instant::now(),
+            played: std::time::Duration::ZERO,
+            paused: false,
+        });
+    }
+
+    fn skip(&mut self, delta: i32) {
+        self.reap_mpv();
+        let Some(p) = self.playing.as_ref() else { return };
+        let next = p.index as i32 + delta;
+        if next < 0 || next >= p.tracks.len() as i32 {
+            return;
+        }
+        let tracks = p.tracks.clone();
+        self.start_track(tracks, next as usize);
+    }
+
+    // Stopgap until mpv is driven over its JSON IPC (see TODO.md): freezing
+    // the process stops audio within a buffer's worth of time, and thawing
+    // it resumes where it left off.
+    fn toggle_pause(&mut self) {
+        self.reap_mpv();
+        let (Some(child), Some(p)) = (self.mpv.as_ref(), self.playing.as_mut()) else { return };
+        let signal = if p.paused { libc::SIGCONT } else { libc::SIGSTOP };
+        if unsafe { libc::kill(child.id() as libc::pid_t, signal) } != 0 {
+            log::warn!("pause/resume: {}", std::io::Error::last_os_error());
+            return;
+        }
+        if p.paused {
+            p.started = std::time::Instant::now();
+            p.paused = false;
+            log::info!("resumed {}", p.item().name);
+        } else {
+            p.played += p.started.elapsed();
+            p.paused = true;
+            log::info!("paused {}", p.item().name);
+        }
+    }
+
     fn redraw(&mut self) {
+        self.reap_mpv();
         let egui_glow = self.egui_glow.as_mut().unwrap();
         let window = self.gl_window.as_ref().unwrap().window();
         let log_lines = crate::util::recent_lines();
+        let editing = self.editing;
 
         match self.state.as_ref().unwrap() {
-            State::Error(message) => {
-                let message = message.clone();
-                let editing = self.editing;
+            State::Error(_) | State::ServerAddress => {
+                let (title, message, legend, color) = match self.state.as_ref().unwrap() {
+                    State::Error(message) => ("Can't reach server", message.clone(), LEGEND_ERROR, DIM),
+                    _ => (
+                        "Server address",
+                        "Enter your Jellyfin server's address to get started.".to_owned(),
+                        LEGEND_ADDRESS,
+                        TEXT,
+                    ),
+                };
+                let legend = if editing { LEGEND_EDITING } else { legend };
                 let mut server = self.server.clone();
-                egui_glow.run(window, |ctx| {
-                    egui::CentralPanel::default().show(ctx, |ui| {
-                        ui.heading("Can't reach server");
+                egui_glow.run(window, |ui| {
+                    draw_title(ui, title);
+                    draw_legend(ui, legend);
+                    draw_log_panel(ui, &log_lines);
+                    egui::CentralPanel::default().frame(panel_frame(20, 0)).show(ui, |ui| {
                         ui.label(&message);
-                        ui.add_enabled(
-                            editing,
-                            egui::TextEdit::singleline(&mut server).id(server_field_id()),
-                        );
+                        ui.add_space(18.0);
+                        draw_server_field(ui, &mut server, editing, if editing { TEXT } else { color });
                     });
-                    egui::Panel::bottom("legend").show(ctx, |ui| {
-                        ui.weak(if editing { EDITING_LEGEND } else { ERROR_LEGEND });
-                    });
-                    draw_log_panel(ctx, &log_lines);
                 });
                 self.server = server;
             }
             State::Browsing(browser) => {
                 let frame = browser.current();
                 let title = frame.title.clone();
-                let names: Vec<String> = frame.items.iter().map(|i| i.name.clone()).collect();
+                let at_tracks = frame.at_tracks();
+                let rows: Vec<(String, String, Option<Marker>)> = frame
+                    .items
+                    .iter()
+                    .map(|item| {
+                        let playing = self.playing.as_ref().filter(|p| p.item().id == item.id);
+                        let name = match item.index_number {
+                            Some(n) if at_tracks => format!("{n}. {}", item.name),
+                            _ => item.name.clone(),
+                        };
+                        let right = if at_tracks {
+                            let dur = item.duration_secs().map(fmt_duration).unwrap_or_default();
+                            match playing {
+                                Some(p) => format!("{} / {dur}", fmt_duration(p.position().as_secs())),
+                                None => dur,
+                            }
+                        } else {
+                            item.child_count.map(|n| format!("{n} tracks")).unwrap_or_default()
+                        };
+                        (name, right, playing.map(Playing::marker))
+                    })
+                    .collect();
                 let selected = frame.selected;
 
-                egui_glow.run(window, |ctx| {
-                    egui::Panel::top("title").show(ctx, |ui| {
-                        ui.heading(&title);
+                egui_glow.run(window, |ui| {
+                    draw_title(ui, &title);
+                    draw_legend(ui, if at_tracks { LEGEND_TRACKS } else { LEGEND_ALBUMS });
+                    draw_log_panel(ui, &log_lines);
+                    // The list's left margin leaves GUTTER of room for the
+                    // play marker, which draw_row paints outside the row box.
+                    let list_frame = egui::Frame::new().fill(BG).inner_margin(egui::Margin {
+                        left: SIDE - GUTTER as i8,
+                        right: SIDE,
+                        top: 10,
+                        bottom: 10,
                     });
-                    egui::Panel::bottom("legend").show(ctx, |ui| {
-                        ui.weak(LEGEND);
-                    });
-                    draw_log_panel(ctx, &log_lines);
-                    egui::CentralPanel::default().show(ctx, |ui| {
+                    egui::CentralPanel::default().frame(list_frame).show(ui, |ui| {
+                        ui.spacing_mut().item_spacing.y = 2.0;
                         // Salted by title (unique per level: "Albums", or
                         // each album's own name), so each list keeps its
                         // own scroll offset — otherwise Albums and Tracks
                         // share one ScrollArea's persisted offset, and
                         // going Back visibly re-scrolls to catch up with
                         // wherever the revealed list's selection actually is.
-                        egui::ScrollArea::vertical().id_salt(&title).auto_shrink([false, false]).show(
-                            ui,
-                            |ui| {
-                                if names.is_empty() {
+                        egui::ScrollArea::vertical()
+                            .id_salt(&title)
+                            .auto_shrink([false, false])
+                            .scroll_bar_visibility(egui::scroll_area::ScrollBarVisibility::AlwaysHidden)
+                            .show(ui, |ui| {
+                                if rows.is_empty() {
                                     ui.weak("(empty)");
                                 }
-                                for (idx, name) in names.iter().enumerate() {
-                                    let resp = ui.selectable_label(idx == selected, name);
+                                for (idx, (name, right, marker)) in rows.iter().enumerate() {
+                                    let resp = draw_row(ui, idx == selected, name, right, *marker);
                                     if idx == selected {
                                         // Animated scroll_to_me needs several
                                         // frames to converge, each requiring
@@ -374,8 +684,7 @@ impl App {
                                         );
                                     }
                                 }
-                            },
-                        );
+                            });
                     });
                 });
             }
@@ -384,7 +693,7 @@ impl App {
         unsafe {
             use glow::HasContext as _;
             let gl = self.gl.as_ref().unwrap();
-            gl.clear_color(0.06, 0.06, 0.08, 1.0);
+            gl.clear_color(0.106, 0.106, 0.106, 1.0); // BG
             gl.clear(glow::COLOR_BUFFER_BIT);
         }
         egui_glow.paint(window);
@@ -392,12 +701,18 @@ impl App {
     }
 
     fn handle_nav(&mut self, ev: NavEvent, event_loop: &winit::event_loop::ActiveEventLoop) {
-        if ev == NavEvent::Quit {
-            event_loop.exit();
-            return;
+        match ev {
+            NavEvent::Quit => {
+                event_loop.exit();
+                return;
+            }
+            NavEvent::PlayPause => return self.toggle_pause(),
+            NavEvent::Prev => return self.skip(-1),
+            NavEvent::Next => return self.skip(1),
+            _ => {}
         }
         match self.state.as_mut() {
-            Some(State::Error(_)) if ev == NavEvent::Select && !self.editing => {
+            Some(State::Error(_) | State::ServerAddress) if ev == NavEvent::Select && !self.editing => {
                 if start_editing(&self.pad, &self.proxy) {
                     self.editing = true;
                     if let Some(egui_glow) = &self.egui_glow {
@@ -412,9 +727,10 @@ impl App {
                     browser.back();
                 }
                 NavEvent::Select => match browser.enter() {
-                    Ok(Some(item)) => {
-                        stop_playback(&mut self.mpv);
-                        self.mpv = play(browser, &item);
+                    Ok(Some(_)) => {
+                        let frame = browser.current();
+                        let (tracks, index) = (frame.items.clone(), frame.selected);
+                        self.start_track(tracks, index);
                     }
                     Ok(None) => {}
                     Err(e) => {
@@ -422,8 +738,7 @@ impl App {
                         self.state = Some(State::Error(e));
                     }
                 },
-                NavEvent::Refresh => {}
-                NavEvent::Quit => unreachable!(),
+                _ => {}
             },
             _ => {}
         }
@@ -438,6 +753,7 @@ impl winit::application::ApplicationHandler<AppEvent> for App {
 
         let egui_glow = egui_glow::EguiGlow::new(event_loop, Arc::clone(&gl), None, None, true);
         egui_glow.egui_ctx.set_fonts(load_fonts());
+        apply_theme(&egui_glow.egui_ctx);
         self.egui_glow = Some(egui_glow);
         self.gl = Some(gl);
         self.gl_window = Some(gl_window);
@@ -490,6 +806,7 @@ impl winit::application::ApplicationHandler<AppEvent> for App {
                 if let Some(egui_glow) = &self.egui_glow {
                     egui_glow.egui_ctx.memory_mut(|m| m.surrender_focus(server_field_id()));
                 }
+                self.server = self.server.trim().trim_end_matches('/').to_string();
                 self.state = Some(connect(&self.server, &self.username, &self.password));
                 if let Some(gl_window) = &self.gl_window {
                     gl_window.window().request_redraw();
@@ -567,6 +884,7 @@ pub fn run(server: String, username: String, password: String) {
         password,
         state: None,
         mpv: None,
+        playing: None,
         pad,
         proxy,
         editing: false,

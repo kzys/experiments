@@ -17,6 +17,10 @@ pub struct Frame {
 }
 
 impl Frame {
+    pub fn at_tracks(&self) -> bool {
+        matches!(self.level, Level::Tracks)
+    }
+
     // Pure and Client-free, so the wrap-around behavior is unit-testable
     // without a live server (see the tests below).
     fn move_selection(&mut self, delta: i32) {
@@ -89,7 +93,9 @@ mod tests {
     use super::*;
 
     fn frame(len: usize) -> Frame {
-        let items = (0..len).map(|i| Item { id: i.to_string(), name: i.to_string() }).collect();
+        let items = (0..len)
+            .map(|i| Item { id: i.to_string(), name: i.to_string(), ..Default::default() })
+            .collect();
         Frame { level: Level::Albums, title: String::new(), items, selected: 0 }
     }
 

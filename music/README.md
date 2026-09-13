@@ -10,20 +10,23 @@ Working:
   (`Users/AuthenticateByName`), then opens a fullscreen egui UI (via
   `egui_glow`/glutin, in a plain `xdg_shell` toplevel) for browsing albums
   → tracks with the gamepad: D-pad to move, A to select, B to back out a
-  level, Select to quit. No artist level — see PLAN.md. Text renders with
+  level, X to play/pause, L1/R1 to skip, Select to quit. No artist level —
+  see PLAN.md. Text renders with
   EmulationStation's bundled Rubik, falling back to its bundled Droid Sans
   Fallback for CJK glyphs neither Rubik nor egui's own (unbundled, to save
   binary size) fonts cover.
 - Playing a track shells out to `mpv --no-video` on its direct-play stream
   URL. Selecting a new track kills whatever's currently playing and spawns
-  the next one; there's still no pause/skip/volume without a restart — that
-  needs mpv's JSON IPC socket (see PLAN.md's playback-control step).
+  the next one, and skip does the same with the adjacent track; pause is
+  SIGSTOP/SIGCONT on that process. Doing this properly needs mpv's JSON
+  IPC socket (see PLAN.md's playback-control step and TODO.md).
 - A handful of the most recent log lines are always visible on screen (log
   panel), and the full log is persisted to disk — the only way to see
   what's going wrong on a kiosk device with no console.
 - Server/username/password come from `-s`/`-u`/`-p` or
   `$JELLYFIN_SERVER`/`$JELLYFIN_USER`/`$JELLYFIN_PASSWORD`, so the password
-  needn't land in shell history.
+  needn't land in shell history. With no server set at all, the UI opens
+  on a "Server address" screen and asks for one there (typed via lowkey).
 - Cross-builds for aarch64 the same way as `../lowkey`: rustls instead of
   OpenSSL, so there's nothing to have on the device's sysroot before linking.
 - `rocknix/Music.sh` is the EmulationStation Ports launcher (shows up as

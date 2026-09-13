@@ -1,12 +1,15 @@
 // Minimal gamepad reading for list navigation: D-pad/hat move the
-// selection, A confirms, B goes back, Select quits. Up/Down auto-repeat
+// selection, A confirms, B goes back, Select quits; X toggles play/pause
+// and L1/R1 skip between tracks. Up/Down auto-repeat
 // while held (see Repeater) — a large music library scrolls one screenful
 // per held direction rather than one row per press; the other buttons stay
 // one-shot, same as lowkey's own grid does for taps versus moves.
 //
 // Button mapping matches lowkey's confirmed layout on this device: A is
 // BTN_EAST, B is BTN_SOUTH (this device's driver reports the Nintendo-style
-// face buttons that way).
+// face buttons that way), so X is assumed to be BTN_NORTH by the same
+// layout — not yet confirmed on the hardware. L1/R1 are the usual
+// BTN_TL/BTN_TR.
 
 use std::fs::{File, OpenOptions};
 use std::os::fd::AsRawFd;
@@ -21,6 +24,9 @@ pub enum NavEvent {
     Select,
     Back,
     Quit,
+    PlayPause,
+    Prev,
+    Next,
     // No navigation effect; just asks for a redraw. Used to get a just-logged
     // message (e.g. the reader thread dying) on screen instead of the app
     // going quiet with nothing to show for it.
@@ -49,6 +55,9 @@ pub fn decode(ev: &sys::input_event) -> Option<NavEvent> {
         c if c == sys::BTN_EAST => Some(NavEvent::Select),
         c if c == sys::BTN_SOUTH => Some(NavEvent::Back),
         c if c == sys::BTN_SELECT => Some(NavEvent::Quit),
+        c if c == sys::BTN_NORTH => Some(NavEvent::PlayPause),
+        c if c == sys::BTN_TL => Some(NavEvent::Prev),
+        c if c == sys::BTN_TR => Some(NavEvent::Next),
         _ => None,
     }
 }

@@ -44,12 +44,28 @@ struct ItemsResponse {
     items: Vec<Item>,
 }
 
-#[derive(Deserialize, Clone)]
+#[derive(Deserialize, Clone, Default)]
 pub struct Item {
     #[serde(rename = "Id")]
     pub id: String,
     #[serde(rename = "Name")]
     pub name: String,
+    // Track number within its album; absent on albums and untagged tracks.
+    #[serde(rename = "IndexNumber")]
+    pub index_number: Option<u32>,
+    // Duration in 100ns ticks (Jellyfin's unit); absent on albums.
+    #[serde(rename = "RunTimeTicks")]
+    pub run_time_ticks: Option<u64>,
+    // Number of tracks; albums only, and only when the listing asks for it
+    // (see list_albums).
+    #[serde(rename = "ChildCount")]
+    pub child_count: Option<u32>,
+}
+
+impl Item {
+    pub fn duration_secs(&self) -> Option<u64> {
+        self.run_time_ticks.map(|t| t / 10_000_000)
+    }
 }
 
 // Authenticates with a username/password and returns a client bound to the
@@ -97,7 +113,12 @@ impl Client {
     // real folders, so a flat recursive listing gets all of them regardless
     // of how tangled the artist tagging above them is.
     pub fn list_albums(&self) -> Result<Vec<Item>, String> {
-        self.get_items(&[("IncludeItemTypes", "MusicAlbum"), ("Recursive", "true"), ("SortBy", "SortName")])
+        self.get_items(&[
+            ("IncludeItemTypes", "MusicAlbum"),
+            ("Recursive", "true"),
+            ("SortBy", "SortName"),
+            ("Fields", "ChildCount"),
+        ])
     }
 
     // ParentId (folder-based): an album's tracks really do live in one
