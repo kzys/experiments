@@ -1,6 +1,7 @@
 // Minimal gamepad reading for list navigation: D-pad/hat move the
 // selection, A confirms, B goes back, Select quits; X toggles play/pause
-// and L1/R1 skip between tracks. Up/Down auto-repeat
+// and L1/R1 skip between tracks; Select+Start together toggles hold mode
+// (see Chord). Up/Down auto-repeat
 // while held (see Repeater) — a large music library scrolls one screenful
 // per held direction rather than one row per press; the other buttons stay
 // one-shot, same as lowkey's own grid does for taps versus moves.
@@ -27,6 +28,9 @@ pub enum NavEvent {
     PlayPause,
     Prev,
     Next,
+    // Toggles hold mode: buttons ignored and the screen dark, for carrying
+    // the device in a bag while it keeps playing. Select+Start together.
+    Hold,
     // No navigation effect; just asks for a redraw. Used to get a just-logged
     // message (e.g. the reader thread dying) on screen instead of the app
     // going quiet with nothing to show for it.
@@ -49,12 +53,13 @@ pub fn decode(ev: &sys::input_event) -> Option<NavEvent> {
     if ev.type_ as i32 != sys::EV_KEY || ev.value != 1 {
         return None; // only react to presses
     }
+    // Select isn't here: whether it means Quit or is half of the hold chord
+    // only becomes known on release (see Chord).
     match ev.code as i32 {
         c if c == sys::BTN_DPAD_UP => Some(NavEvent::Up),
         c if c == sys::BTN_DPAD_DOWN => Some(NavEvent::Down),
         c if c == sys::BTN_EAST => Some(NavEvent::Select),
         c if c == sys::BTN_SOUTH => Some(NavEvent::Back),
-        c if c == sys::BTN_SELECT => Some(NavEvent::Quit),
         c if c == sys::BTN_NORTH => Some(NavEvent::PlayPause),
         c if c == sys::BTN_TL => Some(NavEvent::Prev),
         c if c == sys::BTN_TR => Some(NavEvent::Next),
@@ -99,14 +104,64 @@ pub fn open_pad(want: Option<&str>) -> Option<EvdevHandle<File>> {
 // common case, not a sign of that: most raw reads decode to nothing at all
 // (EV_SYN, key releases, a hat axis re-centering all hit decode's `None`
 // arms) even though the device is perfectly fine.
-pub fn read_pad(pad: &EvdevHandle<File>, repeat: &mut Repeater) -> Option<Vec<NavEvent>> {
+pub fn read_pad(
+    pad: &EvdevHandle<File>,
+    repeat: &mut Repeater,
+    chord: &mut Chord,
+) -> Option<Vec<NavEvent>> {
     let mut evs: [sys::input_event; 32] = unsafe { std::mem::zeroed() };
     let n = pad.read(&mut evs).ok()?;
     let now = Instant::now();
     for ev in &evs[..n] {
         repeat.observe(ev, now);
     }
-    Some(evs[..n].iter().filter_map(decode).collect())
+    Some(evs[..n].iter().filter_map(|ev| chord.observe(ev).or_else(|| decode(ev))).collect())
+}
+
+// Select alone quits; Select and Start down together toggle hold mode. The
+// two can't be told apart on Select's press, so Quit fires on Select's
+// release instead, and only if Start never joined it in between — a chord
+// fires once, when the second button lands, whichever order they come in.
+pub struct Chord {
+    select_down: bool,
+    start_down: bool,
+    fired: bool,
+}
+
+impl Chord {
+    pub fn new() -> Self {
+        Chord { select_down: false, start_down: false, fired: false }
+    }
+
+    pub fn observe(&mut self, ev: &sys::input_event) -> Option<NavEvent> {
+        if ev.type_ as i32 != sys::EV_KEY {
+            return None;
+        }
+        let down = match ev.value {
+            1 => true,
+            0 => false,
+            _ => return None, // driver-level autorepeat report
+        };
+        match ev.code as i32 {
+            c if c == sys::BTN_SELECT => {
+                let was_down = self.select_down;
+                self.select_down = down;
+                if !down && was_down && !self.fired {
+                    return Some(NavEvent::Quit);
+                }
+                if !down {
+                    self.fired = false;
+                }
+            }
+            c if c == sys::BTN_START => self.start_down = down,
+            _ => return None,
+        }
+        if down && self.select_down && self.start_down && !self.fired {
+            self.fired = true;
+            return Some(NavEvent::Hold);
+        }
+        None
+    }
 }
 
 // Blocks up to `timeout_ms` (-1: forever, 0: don't block) for the pad to
@@ -231,5 +286,46 @@ mod tests {
 
         assert_eq!(r.poll_timeout_ms(t0), -1);
         assert_eq!(r.due(t0 + Duration::from_secs(10)), None);
+    }
+
+    fn key(code: i32, value: i32) -> sys::input_event {
+        sys::input_event {
+            time: unsafe { std::mem::zeroed() },
+            type_: sys::EV_KEY as u16,
+            code: code as u16,
+            value,
+        }
+    }
+
+    #[test]
+    fn select_alone_quits_on_release() {
+        let mut c = Chord::new();
+        assert_eq!(c.observe(&key(sys::BTN_SELECT, 1)), None);
+        assert_eq!(c.observe(&key(sys::BTN_SELECT, 0)), Some(NavEvent::Quit));
+    }
+
+    #[test]
+    fn select_then_start_holds_without_quitting() {
+        let mut c = Chord::new();
+        assert_eq!(c.observe(&key(sys::BTN_SELECT, 1)), None);
+        assert_eq!(c.observe(&key(sys::BTN_START, 1)), Some(NavEvent::Hold));
+        assert_eq!(c.observe(&key(sys::BTN_START, 0)), None);
+        assert_eq!(c.observe(&key(sys::BTN_SELECT, 0)), None);
+    }
+
+    #[test]
+    fn start_then_select_holds_too() {
+        let mut c = Chord::new();
+        assert_eq!(c.observe(&key(sys::BTN_START, 1)), None);
+        assert_eq!(c.observe(&key(sys::BTN_SELECT, 1)), Some(NavEvent::Hold));
+        assert_eq!(c.observe(&key(sys::BTN_SELECT, 0)), None);
+        assert_eq!(c.observe(&key(sys::BTN_START, 0)), None);
+    }
+
+    #[test]
+    fn start_alone_does_nothing() {
+        let mut c = Chord::new();
+        assert_eq!(c.observe(&key(sys::BTN_START, 1)), None);
+        assert_eq!(c.observe(&key(sys::BTN_START, 0)), None);
     }
 }

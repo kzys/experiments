@@ -208,7 +208,7 @@ const SIDE: i8 = 32; // horizontal padding of every panel
 // Space left of the list for the play marker, which sits outside the row.
 const GUTTER: f32 = 23.0;
 
-const LEGEND_ALBUMS: &str = "A: select   B: back   Select: quit";
+const LEGEND_ALBUMS: &str = "A: select   B: back   Select: quit   Select+Start: hold";
 const LEGEND_TRACKS: &str = "A: select   B: back   X: play/pause   L1/R1: skip   Select: quit";
 const LEGEND_ERROR: &str = "A: edit server   Select: quit";
 const LEGEND_ADDRESS: &str = "A: edit address   Select: quit";
@@ -437,6 +437,50 @@ fn stop_playback(mpv: &mut Option<std::process::Child>) {
     }
 }
 
+// ---- Hold mode ---------------------------------------------------------------
+//
+// For carrying the device in a bag while it keeps playing: buttons are
+// ignored, the backlight is off, and the power button is grabbed so a
+// stray press can't trigger ROCKNIX's suspend (which mutes audio, freezes
+// the foreground process and shuts down after a delay). Real suspend is no
+// use here — the CPU stops, and so does mpv.
+
+// FB_BLANK_POWERDOWN / FB_BLANK_UNBLANK, written to each panel's bl_power —
+// the same thing ROCKNIX's own rocknix-fake-suspend does by default. Leaves
+// the user's brightness level alone.
+const BL_POWER_OFF: &str = "4";
+const BL_POWER_ON: &str = "0";
+
+fn set_backlight(value: &str) {
+    let Ok(dir) = std::fs::read_dir("/sys/class/backlight") else {
+        log::warn!("no /sys/class/backlight; can't switch the backlight");
+        return;
+    };
+    for entry in dir.flatten() {
+        let path = entry.path().join("bl_power");
+        if let Err(e) = std::fs::write(&path, value) {
+            log::warn!("backlight {}: {e}", path.display());
+        }
+    }
+}
+
+// The power button is its own evdev node (the PMIC's key), separate from the
+// gamepad, so it's found by name. Grabbed exclusively for as long as the
+// returned handle lives; dropping it releases the grab.
+const POWER_KEY_DEVICE: &str = "axp20x-pek";
+
+fn grab_power_key() -> Option<EvdevHandle<File>> {
+    let Some(key) = pad::open_pad(Some(POWER_KEY_DEVICE)) else {
+        log::warn!("power button ({POWER_KEY_DEVICE}) not found; not blocking it");
+        return None;
+    };
+    if let Err(e) = key.grab(true) {
+        log::warn!("power button EVIOCGRAB: {e}");
+        return None;
+    }
+    Some(key)
+}
+
 // ---- App ---------------------------------------------------------------------
 
 // Browsing normally; a request failed and there's nothing to browse — most
@@ -465,6 +509,10 @@ struct App {
     // set from the address/error screens' "A: edit" gesture; cleared when
     // lowkey's process exits (see AppEvent::LowkeyExited).
     editing: bool,
+    // Hold mode (see set_hold). The power button's grab lives exactly as
+    // long as the hold does.
+    held: bool,
+    power_key: Option<EvdevHandle<File>>,
 }
 
 fn connect(server: &str, username: &str, password: &str) -> State {
@@ -700,7 +748,34 @@ impl App {
         self.gl_window.as_ref().unwrap().swap_buffers().ok();
     }
 
+    fn set_hold(&mut self, held: bool) {
+        if held == self.held {
+            return;
+        }
+        self.held = held;
+        if held {
+            log::info!("hold on: buttons ignored, screen off (Select+Start to release)");
+            self.power_key = grab_power_key();
+            set_backlight(BL_POWER_OFF);
+        } else {
+            log::info!("hold off");
+            set_backlight(BL_POWER_ON);
+            self.power_key = None;
+        }
+    }
+
     fn handle_nav(&mut self, ev: NavEvent, event_loop: &winit::event_loop::ActiveEventLoop) {
+        if ev == NavEvent::Hold {
+            // Not while lowkey has the pad: it sees the same presses, and
+            // a dark screen with a live keyboard would be confusing.
+            if !self.editing {
+                self.set_hold(!self.held);
+            }
+            return;
+        }
+        if self.held {
+            return; // everything else is a stray press in a bag
+        }
         match ev {
             NavEvent::Quit => {
                 event_loop.exit();
@@ -817,12 +892,16 @@ impl winit::application::ApplicationHandler<AppEvent> for App {
         };
 
         self.handle_nav(ev, event_loop);
-        if let Some(gl_window) = &self.gl_window {
+        // No point painting a dark screen; also keeps the GPU idle while
+        // held.
+        if !self.held && let Some(gl_window) = &self.gl_window {
             gl_window.window().request_redraw();
         }
     }
 
     fn exiting(&mut self, _event_loop: &winit::event_loop::ActiveEventLoop) {
+        // Never leave the screen dark behind us, whatever the exit path.
+        self.set_hold(false);
         stop_playback(&mut self.mpv);
         if let Some(egui_glow) = self.egui_glow.as_mut() {
             egui_glow.destroy();
@@ -850,13 +929,14 @@ pub fn run(server: String, username: String, password: String) {
     let reader_proxy = proxy.clone();
     std::thread::spawn(move || {
         let mut repeat = pad::Repeater::new();
+        let mut chord = pad::Chord::new();
         loop {
             // Wakes early for a real event, or on its own once a held
             // direction's repeat comes due — read_pad blocks indefinitely
             // otherwise, which would starve auto-repeat between presses.
             let timeout_ms = repeat.poll_timeout_ms(std::time::Instant::now());
             if pad::wait_readable(&reader_pad, timeout_ms) {
-                let Some(events) = pad::read_pad(&reader_pad, &mut repeat) else {
+                let Some(events) = pad::read_pad(&reader_pad, &mut repeat, &mut chord) else {
                     log::error!("gamepad reader: read error, giving up");
                     reader_proxy.send_event(AppEvent::Nav(NavEvent::Refresh)).ok();
                     return;
@@ -888,6 +968,8 @@ pub fn run(server: String, username: String, password: String) {
         pad,
         proxy,
         editing: false,
+        held: false,
+        power_key: None,
     };
     event_loop.run_app(&mut app).unwrap_or_else(|e| die(&format!("event loop error: {e}")));
 }

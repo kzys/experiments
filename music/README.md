@@ -10,8 +10,12 @@ Working:
   (`Users/AuthenticateByName`), then opens a fullscreen egui UI (via
   `egui_glow`/glutin, in a plain `xdg_shell` toplevel) for browsing albums
   → tracks with the gamepad: D-pad to move, A to select, B to back out a
-  level, X to play/pause, L1/R1 to skip, Select to quit. No artist level —
-  see PLAN.md. Text renders with
+  level, X to play/pause, L1/R1 to skip, Select to quit. Select+Start
+  toggles hold mode for carrying the device in a bag: buttons are ignored,
+  the backlight goes off (`bl_power`, as ROCKNIX's own fake-suspend does),
+  and the power button is grabbed so a stray press can't trigger the OS's
+  suspend — playback continues; the volume rocker still works since the
+  OS handles it. No artist level — see PLAN.md. Text renders with
   EmulationStation's bundled Rubik, falling back to its bundled Droid Sans
   Fallback for CJK glyphs neither Rubik nor egui's own (unbundled, to save
   binary size) fonts cover.
