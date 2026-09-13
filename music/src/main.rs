@@ -50,7 +50,7 @@ fn main() {
     let password = args.password.unwrap_or_else(|| util::prompt_password("password: "));
 
     // The actual connection attempt happens inside ui::run, once a surface
-    // exists to show a failure on — this device's server sits behind a
-    // flaky Tailscale link, so that's a routine case, not just a startup one.
+    // exists to show a failure on — this device is on a flaky WiFi link,
+    // so that's a routine case, not just a startup one.
     ui::run(args.server, username, password);
 }

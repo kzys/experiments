@@ -4,8 +4,8 @@ A gamepad-driven Jellyfin audio player for the RG35xx Plus.
 
 ## Where this is (v0)
 
-CLI only: authenticate, list every audio item flat, pick one at a stdin
-prompt, play it with `mpv` on the item's direct-play stream URL. See
+A fullscreen gamepad UI (artists → albums → tracks) authenticates, browses,
+and plays the selection with `mpv` on its direct-play stream URL. See
 README.md for the exact status. Everything below is next.
 
 ## Audio format
@@ -55,17 +55,15 @@ and how.
 
 ## UI
 
-A real (non-console) UI is a Wayland client, not a toolkit app or a
-DRM/KMS one: sway owns the display on ROCKNIX, so anything full-screen has
-to get its surface from the compositor like any other client. Reuse
-lowkey's raw approach — `wayland-client` + `wayland-protocols-wlr`, an shm
-buffer via `memfd`, `fontdue` for text, evdev read directly for the pad —
-rather than a toolkit (`smithay-client-toolkit`, SDL): same
-minimal-dependency style, and most of the registry/buffer boilerplate
-carries over from lowkey nearly as-is. Unlike lowkey, though, this app *is*
-the thing on screen rather than an overlay on top of something else, so it
-wants a plain fullscreen `xdg_shell` toplevel, not layer-shell's
-output-picking/exclusive-zone machinery.
+Done, but not the way originally sketched here: rather than lowkey's raw
+`wayland-client` approach (shm buffer, `fontdue`, hand-rolled layout), the
+UI is egui (immediate-mode) drawn via `egui_glow` (OpenGL ES through
+glutin) into a plain fullscreen `xdg_shell` toplevel obtained through
+winit's Wayland backend. Simpler to build a scrolling list UI against, at
+the cost of pulling in a toolkit rather than staying dependency-minimal
+like lowkey. Evdev reads for the pad still happen directly on their own
+thread (see pad.rs) — no toolkit here understands gamepads — forwarding
+decoded nav events to the winit event loop over an `EventLoopProxy`.
 
 ### Text input (server address, etc.)
 
@@ -84,22 +82,21 @@ any compatible software keyboard), shown and hidden the way iOS/Android do:
   per its own source comment, "EmulationStation runs fullscreen, and sway
   draws fullscreen surfaces over everything below overlay" — so it should
   already draw on top of our fullscreen surface without our layout needing
-  to reflow. Inferred, not yet verified against an actual fullscreen
-  surface of ours — confirm once one exists.
+  to reflow. Inferred, not yet verified against our actual (now egui+glow)
+  fullscreen surface — confirm once this is built.
 - While lowkey holds the gamepad's `EVIOCGRAB`, our own gamepad reads for
   menu navigation stop receiving events for free — that's what makes "pad
   input goes to typing while the keyboard is up" happen without extra code.
-- Need a small evdev-keycode → ASCII table to turn incoming `wl_keyboard`
-  keycodes into characters (a hostname only needs alnum + `.:/-`) — not
-  full `libxkbcommon`, matching this project's low-dependency style.
-  Revisit only if input needs grow past a Latin server URL.
+- No custom evdev-keycode → ASCII table needed: now that the UI goes
+  through winit rather than raw `wayland-client`, incoming `wl_keyboard`
+  events already arrive as decoded text via winit's own `xkbcommon` use —
+  one fewer thing this step has to build.
 
 ## Roadmap
 
-1. **Gamepad UI** — replace the stdin prompt with a real Wayland surface and
-   D-pad navigation (artists → albums → tracks); see "UI" above for the
-   approach and how text entry (server address, Quick Connect's `Code`)
-   works without building an on-screen keyboard into this app.
+1. **Gamepad UI** — done; see "UI" above for the approach taken. Text entry
+   (server address, Quick Connect's `Code`) for the next step still needs
+   the lowkey-delegation plan under "Text input" above built out.
 2. **Login & persisted session** — Quick Connect by default (see above),
    `-u`/`-p` as an explicit fallback. Persist only the access token +
    user id, `0600`, at `$XDG_STATE_HOME/music/token` (else

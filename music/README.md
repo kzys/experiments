@@ -7,12 +7,12 @@ A Jellyfin audio client for the RG35xx Plus.
 Working:
 
 - Authenticates against a Jellyfin server by username/password
-  (`Users/AuthenticateByName`), then opens a fullscreen Wayland UI
-  (`xdg_shell`, 640x480) for browsing artists → albums → tracks with the
-  gamepad: D-pad to move, A to select, B to back out a level, Select to
-  quit. Playing a track shells out to `mpv --no-video` on its direct-play
-  stream URL and blocks until it exits — there's no pause/skip/stop yet (see
-  PLAN.md's playback-control step).
+  (`Users/AuthenticateByName`), then opens a fullscreen egui UI (via
+  `egui_glow`/glutin, in a plain `xdg_shell` toplevel) for browsing artists
+  → albums → tracks with the gamepad: D-pad to move, A to select, B to
+  back out a level, Select to quit. Playing a track shells out to `mpv
+  --no-video` on its direct-play stream URL and blocks until it exits —
+  there's no pause/skip/stop yet (see PLAN.md's playback-control step).
 - Server/username/password come from `-s`/`-u`/`-p` or
   `$JELLYFIN_SERVER`/`$JELLYFIN_USER`/`$JELLYFIN_PASSWORD`, so the password
   needn't land in shell history.

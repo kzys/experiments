@@ -10,11 +10,11 @@ use serde::Deserialize;
 // install since Jellyfin only uses it for display (Dashboard > Devices).
 const DEVICE_ID: &str = "rg35xx-music";
 
-// The server sits behind Tailscale for this deployment, which is flaky
-// enough in practice that a hung connection attempt is a real case, not a
-// hypothetical: without a bound, ureq's default is to wait on the OS's own
-// TCP connect timeout (minutes), leaving the kiosk screen blank that whole
-// time. Every request gets this same bound (see authenticate's AgentBuilder).
+// A handheld on WiFi has a flaky enough connection that a hung request is a
+// real case, not a hypothetical: without a bound, ureq's default is to wait
+// on the OS's own TCP connect timeout (minutes), leaving the kiosk screen
+// blank that whole time. Every request gets this same bound (see
+// authenticate's AgentBuilder).
 const REQUEST_TIMEOUT: Duration = Duration::from_secs(10);
 
 pub struct Client {
@@ -54,8 +54,8 @@ pub struct Item {
 
 // Authenticates with a username/password and returns a client bound to the
 // resulting user and access token. Returns the failure as a message rather
-// than dying outright: the server sitting behind a flaky Tailscale link
-// makes this a routine failure the UI should show, not a startup-only panic.
+// than dying outright: a flaky connection makes this a routine failure the
+// UI should show, not a startup-only panic.
 pub fn authenticate(server: &str, username: &str, password: &str) -> Result<Client, String> {
     let agent = ureq::AgentBuilder::new().timeout(REQUEST_TIMEOUT).build();
     let auth_header = format!(

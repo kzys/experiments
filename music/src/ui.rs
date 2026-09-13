@@ -151,9 +151,10 @@ fn play(browser: &Browser, item: &Item) {
 }
 
 // Either browsing normally, or a request failed and there's nothing to
-// browse — most likely the Tailscale-tunneled server being unreachable,
-// which is routine enough here that it needs an on-screen message instead
-// of the process just dying with nothing visible on the kiosk's screen.
+// browse — most likely the server being unreachable over a flaky WiFi
+// link, which is routine enough here that it needs an on-screen message
+// instead of the process just dying with nothing visible on the kiosk's
+// screen.
 enum State {
     Browsing(Browser),
     Error(String),
@@ -239,8 +240,8 @@ impl winit::application::ApplicationHandler<NavEvent> for App {
         self.gl_window = Some(gl_window);
 
         // Only now, with a surface up, is there somewhere to show a failure
-        // — connect after, not before, so a flaky Tailscale link shows an
-        // on-screen message instead of the process dying with nothing to see.
+        // — connect after, not before, so a flaky link shows an on-screen
+        // message instead of the process dying with nothing to see.
         self.state = Some(
             match api::authenticate(&self.server, &self.username, &self.password).and_then(Browser::new) {
                 Ok(browser) => State::Browsing(browser),
