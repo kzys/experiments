@@ -137,6 +137,24 @@ fn create_display(
     (ctx, gl)
 }
 
+// egui's default_fonts feature is off (see Cargo.toml) to shave the ~1.4MB
+// of bundled TTFs off the release binary, which leaves egui with no font at
+// all — every label silently draws nothing rather than erroring. ROCKNIX
+// also has no /usr/share/fonts to fall back on, same problem lowkey's
+// Terminal.sh hits for its on-screen keyboard; reuse its fix and point at
+// EmulationStation's own bundled Rubik, present on every ROCKNIX install.
+const FONT_PATH: &str = "/usr/config/emulationstation/resources/Rubik-Regular.ttf";
+
+fn load_fonts() -> egui::FontDefinitions {
+    let bytes =
+        std::fs::read(FONT_PATH).unwrap_or_else(|e| die(&format!("cannot read font {FONT_PATH}: {e}")));
+    let mut fonts = egui::FontDefinitions::empty();
+    fonts.font_data.insert("Rubik".to_owned(), Arc::new(egui::FontData::from_owned(bytes)));
+    fonts.families.insert(egui::FontFamily::Proportional, vec!["Rubik".to_owned()]);
+    fonts.families.insert(egui::FontFamily::Monospace, vec!["Rubik".to_owned()]);
+    fonts
+}
+
 // Runs mpv on the item's stream URL and blocks until it exits. Logged, not
 // fatal, on failure — a bad track shouldn't take down the browser. This
 // blocks the whole event loop, gamepad input included, for the duration of
@@ -235,7 +253,9 @@ impl winit::application::ApplicationHandler<NavEvent> for App {
         let gl = Arc::new(gl);
         gl_window.window().set_visible(true);
 
-        self.egui_glow = Some(egui_glow::EguiGlow::new(event_loop, Arc::clone(&gl), None, None, true));
+        let egui_glow = egui_glow::EguiGlow::new(event_loop, Arc::clone(&gl), None, None, true);
+        egui_glow.egui_ctx.set_fonts(load_fonts());
+        self.egui_glow = Some(egui_glow);
         self.gl = Some(gl);
         self.gl_window = Some(gl_window);
 
