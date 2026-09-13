@@ -505,14 +505,28 @@ pub fn run(server: String, username: String, password: String) {
 
     let reader_pad = Arc::clone(&pad);
     let reader_proxy = proxy.clone();
-    std::thread::spawn(move || loop {
-        let Some(events) = pad::read_pad(&reader_pad) else {
-            log::error!("gamepad reader: read error, giving up");
-            reader_proxy.send_event(AppEvent::Nav(NavEvent::Refresh)).ok();
-            return;
-        };
-        for ev in events {
-            if reader_proxy.send_event(AppEvent::Nav(ev)).is_err() {
+    std::thread::spawn(move || {
+        let mut repeat = pad::Repeater::new();
+        loop {
+            // Wakes early for a real event, or on its own once a held
+            // direction's repeat comes due — read_pad blocks indefinitely
+            // otherwise, which would starve auto-repeat between presses.
+            let timeout_ms = repeat.poll_timeout_ms(std::time::Instant::now());
+            if pad::wait_readable(&reader_pad, timeout_ms) {
+                let Some(events) = pad::read_pad(&reader_pad, &mut repeat) else {
+                    log::error!("gamepad reader: read error, giving up");
+                    reader_proxy.send_event(AppEvent::Nav(NavEvent::Refresh)).ok();
+                    return;
+                };
+                for ev in events {
+                    if reader_proxy.send_event(AppEvent::Nav(ev)).is_err() {
+                        return; // event loop shut down
+                    }
+                }
+            }
+            if let Some(ev) = repeat.due(std::time::Instant::now())
+                && reader_proxy.send_event(AppEvent::Nav(ev)).is_err()
+            {
                 return; // event loop shut down
             }
         }

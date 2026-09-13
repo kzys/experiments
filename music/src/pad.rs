@@ -1,14 +1,16 @@
 // Minimal gamepad reading for list navigation: D-pad/hat move the
-// selection, A confirms, B goes back, Select quits. Unlike lowkey's
-// keyboard grid, a short list is comfortable to walk one press at a time,
-// so there's no held-direction auto-repeat or shoulder-button chords here
-// (see PLAN.md).
+// selection, A confirms, B goes back, Select quits. Up/Down auto-repeat
+// while held (see Repeater) — a large music library scrolls one screenful
+// per held direction rather than one row per press; the other buttons stay
+// one-shot, same as lowkey's own grid does for taps versus moves.
 //
 // Button mapping matches lowkey's confirmed layout on this device: A is
 // BTN_EAST, B is BTN_SOUTH (this device's driver reports the Nintendo-style
 // face buttons that way).
 
 use std::fs::{File, OpenOptions};
+use std::os::fd::AsRawFd;
+use std::time::{Duration, Instant};
 
 use input_linux::{sys, EvdevHandle, Key};
 
@@ -88,8 +90,137 @@ pub fn open_pad(want: Option<&str>) -> Option<EvdevHandle<File>> {
 // common case, not a sign of that: most raw reads decode to nothing at all
 // (EV_SYN, key releases, a hat axis re-centering all hit decode's `None`
 // arms) even though the device is perfectly fine.
-pub fn read_pad(pad: &EvdevHandle<File>) -> Option<Vec<NavEvent>> {
+pub fn read_pad(pad: &EvdevHandle<File>, repeat: &mut Repeater) -> Option<Vec<NavEvent>> {
     let mut evs: [sys::input_event; 32] = unsafe { std::mem::zeroed() };
     let n = pad.read(&mut evs).ok()?;
+    let now = Instant::now();
+    for ev in &evs[..n] {
+        repeat.observe(ev, now);
+    }
     Some(evs[..n].iter().filter_map(decode).collect())
+}
+
+// Blocks up to `timeout_ms` (-1: forever, 0: don't block) for the pad to
+// become readable, so the reader thread can wake on its own to fire a
+// repeat rather than sitting in read() until the next real event arrives.
+pub fn wait_readable(pad: &EvdevHandle<File>, timeout_ms: i32) -> bool {
+    let mut fds = [libc::pollfd { fd: pad.as_raw_fd(), events: libc::POLLIN, revents: 0 }];
+    let n = unsafe { libc::poll(fds.as_mut_ptr(), 1, timeout_ms) };
+    n > 0
+}
+
+const REPEAT_DELAY: Duration = Duration::from_millis(400);
+const REPEAT_INTERVAL: Duration = Duration::from_millis(120);
+
+// Tracks which direction (if any) is currently held, so the reader thread
+// can re-send it on a timer instead of waiting for more raw events. Only
+// Up/Down repeat — matches lowkey's own grid, where taps (Select, Back,
+// Quit) don't.
+pub struct Repeater {
+    held: Option<NavEvent>,
+    next_at: Instant,
+}
+
+impl Repeater {
+    pub fn new() -> Self {
+        Repeater { held: None, next_at: Instant::now() }
+    }
+
+    // Same hat-or-buttons detection as decode(), but also needs releases
+    // (decode() discards them — a release has no navigation effect of its
+    // own, only this hold-tracking one) to know when to stop repeating.
+    pub fn observe(&mut self, ev: &sys::input_event, now: Instant) {
+        let change = if ev.type_ as i32 == sys::EV_ABS && ev.code as i32 == sys::ABS_HAT0Y {
+            match ev.value {
+                v if v < 0 => Some(Some(NavEvent::Up)),
+                v if v > 0 => Some(Some(NavEvent::Down)),
+                _ => Some(None), // back to center
+            }
+        } else if ev.type_ as i32 == sys::EV_KEY
+            && (ev.code as i32 == sys::BTN_DPAD_UP || ev.code as i32 == sys::BTN_DPAD_DOWN)
+        {
+            let dir =
+                if ev.code as i32 == sys::BTN_DPAD_UP { NavEvent::Up } else { NavEvent::Down };
+            match ev.value {
+                1 => Some(Some(dir)),
+                0 => Some(None),
+                _ => None, // driver-level autorepeat report; already held
+            }
+        } else {
+            None
+        };
+
+        match change {
+            Some(Some(dir)) => {
+                self.held = Some(dir);
+                self.next_at = now + REPEAT_DELAY;
+            }
+            Some(None) => self.held = None,
+            None => {}
+        }
+    }
+
+    // Timeout for wait_readable: how long until the next repeat is due, or
+    // -1 (block indefinitely) when nothing is held.
+    pub fn poll_timeout_ms(&self, now: Instant) -> i32 {
+        match self.held {
+            None => -1,
+            Some(_) if self.next_at <= now => 0,
+            Some(_) => (self.next_at - now).as_millis().min(i32::MAX as u128) as i32,
+        }
+    }
+
+    // Fires a repeat if one is due.
+    pub fn due(&mut self, now: Instant) -> Option<NavEvent> {
+        let dir = self.held?;
+        if now < self.next_at {
+            return None;
+        }
+        self.next_at = now + REPEAT_INTERVAL;
+        Some(dir)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn repeat_fires_after_delay_then_at_interval() {
+        let mut r = Repeater::new();
+        let t0 = Instant::now();
+        let press = sys::input_event {
+            time: unsafe { std::mem::zeroed() },
+            type_: sys::EV_KEY as u16,
+            code: sys::BTN_DPAD_DOWN as u16,
+            value: 1,
+        };
+        r.observe(&press, t0);
+
+        assert_eq!(r.poll_timeout_ms(t0), 400);
+        assert_eq!(r.due(t0 + Duration::from_millis(399)), None);
+
+        let t1 = t0 + Duration::from_millis(400);
+        assert_eq!(r.due(t1), Some(NavEvent::Down));
+        assert_eq!(r.due(t1 + Duration::from_millis(119)), None);
+        assert_eq!(r.due(t1 + Duration::from_millis(120)), Some(NavEvent::Down));
+    }
+
+    #[test]
+    fn release_cancels_pending_repeat() {
+        let mut r = Repeater::new();
+        let t0 = Instant::now();
+        let press = sys::input_event {
+            time: unsafe { std::mem::zeroed() },
+            type_: sys::EV_KEY as u16,
+            code: sys::BTN_DPAD_UP as u16,
+            value: 1,
+        };
+        let release = sys::input_event { value: 0, ..press };
+        r.observe(&press, t0);
+        r.observe(&release, t0);
+
+        assert_eq!(r.poll_timeout_ms(t0), -1);
+        assert_eq!(r.due(t0 + Duration::from_secs(10)), None);
+    }
 }
