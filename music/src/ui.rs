@@ -163,17 +163,21 @@ fn load_fonts() -> egui::FontDefinitions {
     fonts
 }
 
-// Runs mpv on the item's stream URL and blocks until it exits. Logged, not
-// fatal, on failure — a bad track shouldn't take down the browser. This
-// blocks the whole event loop, gamepad input included, for the duration of
-// the track (see PLAN.md's playback-control step).
-fn play(browser: &Browser, item: &Item) {
+// Spawns mpv on the item's stream URL and returns immediately — mpv keeps
+// playing in the background while the event loop (gamepad input included)
+// stays responsive. Failure to spawn is logged, not fatal: a bad track
+// shouldn't take down the browser. Full transport control (pause/skip/
+// volume over mpv's JSON IPC) is still PLAN.md's playback-control step; this
+// just stops playback from freezing the UI.
+fn play(browser: &Browser, item: &Item) -> Option<std::process::Child> {
     let url = browser.stream_url(&item.id);
     log::info!("playing {} ({})", item.name, item.id);
-    match std::process::Command::new("mpv").arg("--no-video").arg(&url).status() {
-        Ok(status) if !status.success() => log::warn!("mpv exited with {status}"),
-        Err(e) => log::warn!("failed to run mpv: {e}"),
-        Ok(_) => {}
+    match std::process::Command::new("mpv").arg("--no-video").arg(&url).spawn() {
+        Ok(child) => Some(child),
+        Err(e) => {
+            log::warn!("failed to run mpv: {e}");
+            None
+        }
     }
 }
 
@@ -195,6 +199,16 @@ struct App {
     username: String,
     password: String,
     state: Option<State>,
+    mpv: Option<std::process::Child>,
+}
+
+// Stops whatever's currently playing, if anything, so starting a new track
+// doesn't leave the old one's audio running underneath it.
+fn stop_playback(mpv: &mut Option<std::process::Child>) {
+    if let Some(mut child) = mpv.take() {
+        child.kill().ok();
+        child.wait().ok();
+    }
 }
 
 // A handful of the most recent log lines (see util.rs), always visible: the
@@ -348,7 +362,10 @@ impl winit::application::ApplicationHandler<NavEvent> for App {
                     browser.back();
                 }
                 NavEvent::Select => match browser.enter() {
-                    Ok(Some(item)) => play(browser, &item),
+                    Ok(Some(item)) => {
+                        stop_playback(&mut self.mpv);
+                        self.mpv = play(browser, &item);
+                    }
                     Ok(None) => {}
                     Err(e) => {
                         log::error!("browse failed: {e}");
@@ -365,6 +382,7 @@ impl winit::application::ApplicationHandler<NavEvent> for App {
     }
 
     fn exiting(&mut self, _event_loop: &winit::event_loop::ActiveEventLoop) {
+        stop_playback(&mut self.mpv);
         if let Some(egui_glow) = self.egui_glow.as_mut() {
             egui_glow.destroy();
         }
@@ -406,6 +424,7 @@ pub fn run(server: String, username: String, password: String) {
         username,
         password,
         state: None,
+        mpv: None,
     };
     event_loop.run_app(&mut app).unwrap_or_else(|e| die(&format!("event loop error: {e}")));
 }
