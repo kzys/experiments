@@ -9,11 +9,13 @@
 // happen on a dedicated thread, forwarding decoded NavEvents to the winit
 // event loop over an EventLoopProxy.
 
+use std::fs::File;
 use std::num::NonZeroU32;
 use std::sync::Arc;
 
 use egui_glow::glow;
 use egui_winit::winit;
+use input_linux::EvdevHandle;
 use winit::raw_window_handle::HasWindowHandle as _;
 
 use crate::api::{self, Item};
@@ -22,6 +24,25 @@ use crate::pad::{self, NavEvent};
 use crate::util::die;
 
 const LEGEND: &str = "A: select   B: back   Select: quit";
+const ERROR_LEGEND: &str = "A: edit server   Select: quit";
+const EDITING_LEGEND: &str = "close lowkey (Select) when done typing";
+
+// Same install location music itself ends up at (see Makefile); spawned by
+// absolute path since rocknix/Music.sh execs us with no guarantee that
+// directory is on $PATH.
+const LOWKEY_BIN: &str = "/storage/.local/bin/lowkey";
+
+fn server_field_id() -> egui::Id {
+    egui::Id::new("server_address")
+}
+
+// The event loop's user event: decoded gamepad nav events, plus the one
+// other async signal the UI reacts to — lowkey (the delegated on-screen
+// keyboard) exiting once the user is done editing.
+enum AppEvent {
+    Nav(NavEvent),
+    LowkeyExited,
+}
 
 struct GlutinWindowContext {
     window: winit::window::Window,
@@ -200,6 +221,53 @@ struct App {
     password: String,
     state: Option<State>,
     mpv: Option<std::process::Child>,
+    pad: Arc<EvdevHandle<File>>,
+    proxy: winit::event_loop::EventLoopProxy<AppEvent>,
+    // Whether lowkey is currently up editing the server address. Only ever
+    // set from the Error screen's "A: edit server" gesture; cleared when
+    // lowkey's process exits (see AppEvent::LowkeyExited).
+    editing: bool,
+}
+
+fn connect(server: &str, username: &str, password: &str) -> State {
+    match api::authenticate(server, username, password).and_then(Browser::new) {
+        Ok(browser) => {
+            log::info!("authenticated, browsing");
+            State::Browsing(browser)
+        }
+        Err(e) => {
+            log::error!("startup failed: {e}");
+            State::Error(e)
+        }
+    }
+}
+
+// Releases our own EVIOCGRAB and spawns lowkey so it can grab the pad
+// exclusively for itself — lowkey logs and carries on ungrabbed if the grab
+// fails (e.g. because we still held it), which would leave it drawn on
+// screen but deaf to button presses. A reaper thread waits for it to exit
+// and wakes the event loop with AppEvent::LowkeyExited, since regrabbing
+// the pad only makes sense once lowkey is actually done with the device.
+fn start_editing(pad: &Arc<EvdevHandle<File>>, proxy: &winit::event_loop::EventLoopProxy<AppEvent>) -> bool {
+    if let Err(e) = pad.grab(false) {
+        log::warn!("EVIOCGRAB release: {e}");
+    }
+    let mut child = match std::process::Command::new(LOWKEY_BIN).spawn() {
+        Ok(c) => c,
+        Err(e) => {
+            log::warn!("failed to run lowkey: {e}");
+            if let Err(e) = pad.grab(true) {
+                log::warn!("EVIOCGRAB: {e}");
+            }
+            return false;
+        }
+    };
+    let proxy = proxy.clone();
+    std::thread::spawn(move || {
+        child.wait().ok();
+        proxy.send_event(AppEvent::LowkeyExited).ok();
+    });
+    true
 }
 
 // Stops whatever's currently playing, if anything, so starting a new track
@@ -233,16 +301,23 @@ impl App {
         match self.state.as_ref().unwrap() {
             State::Error(message) => {
                 let message = message.clone();
+                let editing = self.editing;
+                let mut server = self.server.clone();
                 egui_glow.run(window, |ctx| {
                     egui::CentralPanel::default().show(ctx, |ui| {
                         ui.heading("Can't reach server");
                         ui.label(&message);
+                        ui.add_enabled(
+                            editing,
+                            egui::TextEdit::singleline(&mut server).id(server_field_id()),
+                        );
                     });
                     egui::Panel::bottom("legend").show(ctx, |ui| {
-                        ui.weak("Select: quit");
+                        ui.weak(if editing { EDITING_LEGEND } else { ERROR_LEGEND });
                     });
                     draw_log_panel(ctx, &log_lines);
                 });
+                self.server = server;
             }
             State::Browsing(browser) => {
                 let frame = browser.current();
@@ -284,9 +359,47 @@ impl App {
         egui_glow.paint(window);
         self.gl_window.as_ref().unwrap().swap_buffers().ok();
     }
+
+    fn handle_nav(&mut self, ev: NavEvent, event_loop: &winit::event_loop::ActiveEventLoop) {
+        if ev == NavEvent::Quit {
+            event_loop.exit();
+            return;
+        }
+        match self.state.as_mut() {
+            Some(State::Error(_)) if ev == NavEvent::Select && !self.editing => {
+                if start_editing(&self.pad, &self.proxy) {
+                    self.editing = true;
+                    if let Some(egui_glow) = &self.egui_glow {
+                        egui_glow.egui_ctx.memory_mut(|m| m.request_focus(server_field_id()));
+                    }
+                }
+            }
+            Some(State::Browsing(browser)) => match ev {
+                NavEvent::Up => browser.move_selection(-1),
+                NavEvent::Down => browser.move_selection(1),
+                NavEvent::Back => {
+                    browser.back();
+                }
+                NavEvent::Select => match browser.enter() {
+                    Ok(Some(item)) => {
+                        stop_playback(&mut self.mpv);
+                        self.mpv = play(browser, &item);
+                    }
+                    Ok(None) => {}
+                    Err(e) => {
+                        log::error!("browse failed: {e}");
+                        self.state = Some(State::Error(e));
+                    }
+                },
+                NavEvent::Refresh => {}
+                NavEvent::Quit => unreachable!(),
+            },
+            _ => {}
+        }
+    }
 }
 
-impl winit::application::ApplicationHandler<NavEvent> for App {
+impl winit::application::ApplicationHandler<AppEvent> for App {
     fn resumed(&mut self, event_loop: &winit::event_loop::ActiveEventLoop) {
         let (gl_window, gl) = create_display(event_loop);
         let gl = Arc::new(gl);
@@ -301,18 +414,7 @@ impl winit::application::ApplicationHandler<NavEvent> for App {
         // Only now, with a surface up, is there somewhere to show a failure
         // — connect after, not before, so a flaky link shows an on-screen
         // message instead of the process dying with nothing to see.
-        self.state = Some(
-            match api::authenticate(&self.server, &self.username, &self.password).and_then(Browser::new) {
-                Ok(browser) => {
-                    log::info!("authenticated, browsing");
-                    State::Browsing(browser)
-                }
-                Err(e) => {
-                    log::error!("startup failed: {e}");
-                    State::Error(e)
-                }
-            },
-        );
+        self.state = Some(connect(&self.server, &self.username, &self.password));
 
         self.gl_window.as_ref().unwrap().window().request_redraw();
     }
@@ -347,35 +449,26 @@ impl winit::application::ApplicationHandler<NavEvent> for App {
         }
     }
 
-    fn user_event(&mut self, event_loop: &winit::event_loop::ActiveEventLoop, ev: NavEvent) {
-        if ev == NavEvent::Quit {
-            event_loop.exit();
-            return;
-        }
-        // Nothing to navigate in the error state; the legend there only
-        // offers Select (quit), already handled above.
-        if let Some(State::Browsing(browser)) = self.state.as_mut() {
-            match ev {
-                NavEvent::Up => browser.move_selection(-1),
-                NavEvent::Down => browser.move_selection(1),
-                NavEvent::Back => {
-                    browser.back();
+    fn user_event(&mut self, event_loop: &winit::event_loop::ActiveEventLoop, ev: AppEvent) {
+        let ev = match ev {
+            AppEvent::LowkeyExited => {
+                self.editing = false;
+                if let Err(e) = self.pad.grab(true) {
+                    log::warn!("EVIOCGRAB: {e}");
                 }
-                NavEvent::Select => match browser.enter() {
-                    Ok(Some(item)) => {
-                        stop_playback(&mut self.mpv);
-                        self.mpv = play(browser, &item);
-                    }
-                    Ok(None) => {}
-                    Err(e) => {
-                        log::error!("browse failed: {e}");
-                        self.state = Some(State::Error(e));
-                    }
-                },
-                NavEvent::Refresh => {}
-                NavEvent::Quit => unreachable!(),
+                if let Some(egui_glow) = &self.egui_glow {
+                    egui_glow.egui_ctx.memory_mut(|m| m.surrender_focus(server_field_id()));
+                }
+                self.state = Some(connect(&self.server, &self.username, &self.password));
+                if let Some(gl_window) = &self.gl_window {
+                    gl_window.window().request_redraw();
+                }
+                return;
             }
-        }
+            AppEvent::Nav(ev) => ev,
+        };
+
+        self.handle_nav(ev, event_loop);
         if let Some(gl_window) = &self.gl_window {
             gl_window.window().request_redraw();
         }
@@ -393,24 +486,28 @@ pub fn run(server: String, username: String, password: String) {
     let pad = pad::open_pad(None).unwrap_or_else(|| die("no gamepad found"));
     // Exclusive access: EmulationStation is still running underneath (this
     // app is fullscreen on top of it, not replacing it), and would
-    // otherwise also react to the same button presses.
+    // otherwise also react to the same button presses. Released temporarily
+    // while lowkey is up editing the server address (see start_editing).
     if let Err(e) = pad.grab(true) {
         log::warn!("EVIOCGRAB: {e}");
     }
+    let pad = Arc::new(pad);
 
-    let event_loop = winit::event_loop::EventLoop::<NavEvent>::with_user_event()
+    let event_loop = winit::event_loop::EventLoop::<AppEvent>::with_user_event()
         .build()
         .unwrap_or_else(|e| die(&format!("cannot create event loop: {e}")));
     let proxy = event_loop.create_proxy();
 
+    let reader_pad = Arc::clone(&pad);
+    let reader_proxy = proxy.clone();
     std::thread::spawn(move || loop {
-        let Some(events) = pad::read_pad(&pad) else {
+        let Some(events) = pad::read_pad(&reader_pad) else {
             log::error!("gamepad reader: read error, giving up");
-            proxy.send_event(NavEvent::Refresh).ok();
+            reader_proxy.send_event(AppEvent::Nav(NavEvent::Refresh)).ok();
             return;
         };
         for ev in events {
-            if proxy.send_event(ev).is_err() {
+            if reader_proxy.send_event(AppEvent::Nav(ev)).is_err() {
                 return; // event loop shut down
             }
         }
@@ -425,6 +522,9 @@ pub fn run(server: String, username: String, password: String) {
         password,
         state: None,
         mpv: None,
+        pad,
+        proxy,
+        editing: false,
     };
     event_loop.run_app(&mut app).unwrap_or_else(|e| die(&format!("event loop error: {e}")));
 }

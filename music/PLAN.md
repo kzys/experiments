@@ -79,8 +79,11 @@ the only way to see what's going wrong on a kiosk device with no console.
 
 ### Text input (server address, etc.)
 
-Don't build an on-screen keyboard into this app — delegate to lowkey (or
-any compatible software keyboard), shown and hidden the way iOS/Android do:
+Built for the server address field on the "Can't reach server" screen (`A`
+to edit, `Select` on lowkey when finished); not yet run on the device.
+Delegates to lowkey (or any compatible software keyboard) rather than
+building an on-screen keyboard into this app, shown and hidden the way
+iOS/Android do:
 
 - lowkey never takes Wayland keyboard focus itself
   (`KeyboardInteractivity::None`) and types through a `uinput` virtual
@@ -88,27 +91,32 @@ any compatible software keyboard), shown and hidden the way iOS/Android do:
   ordinary `wl_keyboard` events, indistinguishable from a real keyboard. No
   IPC or lowkey-specific protocol needed.
 - Show/hide *is* the process lifecycle: spawn lowkey when a text field is
-  activated, kill it (or let it exit on Select) once editing is done. Its
-  Wayland surface only exists while the process runs.
+  activated, and treat its exit (however triggered — it has no way to hand
+  a typed value back other than the keystrokes already sent) as "done
+  editing", which re-authenticates with whatever ended up in the field.
+- Turned out not to be "for free": *we* grab the gamepad exclusively at
+  startup (to shut EmulationStation out), so lowkey's own `EVIOCGRAB` would
+  otherwise find the device already claimed and — per its own "log and
+  keep going ungrabbed" handling — sit on screen deaf to button presses.
+  Fixed by releasing our grab before spawning lowkey and reacquiring it once
+  lowkey's process exits.
 - lowkey requests the wlr-layer-shell *Overlay* layer specifically because,
   per its own source comment, "EmulationStation runs fullscreen, and sway
   draws fullscreen surfaces over everything below overlay" — so it should
   already draw on top of our fullscreen surface without our layout needing
-  to reflow. Inferred, not yet verified against our actual (now egui+glow)
-  fullscreen surface — confirm once this is built.
-- While lowkey holds the gamepad's `EVIOCGRAB`, our own gamepad reads for
-  menu navigation stop receiving events for free — that's what makes "pad
-  input goes to typing while the keyboard is up" happen without extra code.
+  to reflow. Inferred, not yet verified on the device against our actual
+  (now egui+glow) fullscreen surface.
 - No custom evdev-keycode → ASCII table needed: now that the UI goes
   through winit rather than raw `wayland-client`, incoming `wl_keyboard`
   events already arrive as decoded text via winit's own `xkbcommon` use —
-  one fewer thing this step has to build.
+  one fewer thing this step had to build.
 
 ## Roadmap
 
 1. **Gamepad UI** — done; see "UI" above for the approach taken. Text entry
-   (server address, Quick Connect's `Code`) for the next step still needs
-   the lowkey-delegation plan under "Text input" above built out.
+   for the server address is also done (see "Text input" above); Quick
+   Connect's `Code` still needs a field once Quick Connect itself (next
+   item) is built.
 2. **Login & persisted session** — Quick Connect by default (see above),
    `-u`/`-p` as an explicit fallback. Persist only the access token +
    user id, `0600`, at `$XDG_STATE_HOME/music/token` (else
