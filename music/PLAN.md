@@ -1,0 +1,148 @@
+# PLAN
+
+A gamepad-driven Jellyfin audio player for the RG35xx Plus.
+
+## Where this is (v0)
+
+CLI only: authenticate, list every audio item flat, pick one at a stdin
+prompt, play it with `mpv` on the item's direct-play stream URL. See
+README.md for the exact status. Everything below is next.
+
+## Audio format
+
+Jellyfin transcodes on the fly — the stream URL just needs `static=true`
+dropped and `audioCodec`/`maxAudioBitrate` added, and the server re-encodes
+FLAC (or anything else) to the requested codec per request, no pre-conversion
+needed on our side.
+
+AAC is an ordinary file (`.m4a`), not a streaming-only format — the same
+bytes a transcoded stream sends can be written to disk instead of piped to
+`mpv`, and played back later with no network at all. So "transcode for
+playback" and "cache for offline" are the same download, just with a
+different destination. That argues for building the transcoded stream first
+and getting a local cache almost for free, rather than a separate
+FLAC-to-lossy conversion pipeline living outside Jellyfin.
+
+Default: 192kbps AAC-LC for every transcode, untested on the device but
+comfortably past "transparent" for a handheld's built-in speaker or a 3.5mm
+jack. Treated as the shipped default, not a blocker — revisit only if it
+audibly sounds bad on the actual hardware.
+
+## Login
+
+Typing a password with a D-pad and face buttons is miserable, so v0's stdin
+prompt is a placeholder, not the intended UX. Jellyfin has an answer for
+exactly this — **Quick Connect**, built for TVs/consoles with no keyboard —
+and it's confirmed working end-to-end against the real server:
+
+1. `POST /QuickConnect/Initiate` → `{Secret, Code, ...}`. Show `Code` (a
+   6-digit number) on screen.
+2. Poll `GET /QuickConnect/Connect?secret=...` until `Authenticated: true`.
+   The user enters `Code` once on any already-logged-in client (phone,
+   web) — nothing is typed on the handheld itself.
+3. `POST /Users/AuthenticateWithQuickConnect {Secret}` → same
+   `{AccessToken, User}` shape as `AuthenticateByName`. Verified: the
+   resulting token authorizes normal API calls exactly like a
+   password-derived one.
+
+This becomes the default login path. `-u`/`-p` (or the env vars) stay as an
+explicit override for scripting/testing — not removed, just no longer the
+primary flow a person actually uses on the device.
+
+Only the resulting `AccessToken` + `user_id` get persisted — never a
+password, whichever login path produced it. See "Roadmap" below for where
+and how.
+
+## UI
+
+A real (non-console) UI is a Wayland client, not a toolkit app or a
+DRM/KMS one: sway owns the display on ROCKNIX, so anything full-screen has
+to get its surface from the compositor like any other client. Reuse
+lowkey's raw approach — `wayland-client` + `wayland-protocols-wlr`, an shm
+buffer via `memfd`, `fontdue` for text, evdev read directly for the pad —
+rather than a toolkit (`smithay-client-toolkit`, SDL): same
+minimal-dependency style, and most of the registry/buffer boilerplate
+carries over from lowkey nearly as-is. Unlike lowkey, though, this app *is*
+the thing on screen rather than an overlay on top of something else, so it
+wants a plain fullscreen `xdg_shell` toplevel, not layer-shell's
+output-picking/exclusive-zone machinery.
+
+### Text input (server address, etc.)
+
+Don't build an on-screen keyboard into this app — delegate to lowkey (or
+any compatible software keyboard), shown and hidden the way iOS/Android do:
+
+- lowkey never takes Wayland keyboard focus itself
+  (`KeyboardInteractivity::None`) and types through a `uinput` virtual
+  keyboard, so whatever *does* have focus — our surface — just receives
+  ordinary `wl_keyboard` events, indistinguishable from a real keyboard. No
+  IPC or lowkey-specific protocol needed.
+- Show/hide *is* the process lifecycle: spawn lowkey when a text field is
+  activated, kill it (or let it exit on Select) once editing is done. Its
+  Wayland surface only exists while the process runs.
+- lowkey requests the wlr-layer-shell *Overlay* layer specifically because,
+  per its own source comment, "EmulationStation runs fullscreen, and sway
+  draws fullscreen surfaces over everything below overlay" — so it should
+  already draw on top of our fullscreen surface without our layout needing
+  to reflow. Inferred, not yet verified against an actual fullscreen
+  surface of ours — confirm once one exists.
+- While lowkey holds the gamepad's `EVIOCGRAB`, our own gamepad reads for
+  menu navigation stop receiving events for free — that's what makes "pad
+  input goes to typing while the keyboard is up" happen without extra code.
+- Need a small evdev-keycode → ASCII table to turn incoming `wl_keyboard`
+  keycodes into characters (a hostname only needs alnum + `.:/-`) — not
+  full `libxkbcommon`, matching this project's low-dependency style.
+  Revisit only if input needs grow past a Latin server URL.
+
+## Roadmap
+
+1. **Gamepad UI** — replace the stdin prompt with a real Wayland surface and
+   D-pad navigation (artists → albums → tracks); see "UI" above for the
+   approach and how text entry (server address, Quick Connect's `Code`)
+   works without building an on-screen keyboard into this app.
+2. **Login & persisted session** — Quick Connect by default (see above),
+   `-u`/`-p` as an explicit fallback. Persist only the access token +
+   user id, `0600`, at `$XDG_STATE_HOME/music/token` (else
+   `$HOME/.local/state/music/token`) — this ecosystem has no OS keyring to
+   delegate to (checked: no Secret Service, no usable `systemd-creds`
+   without a TPM or persistent `/var`) and ROCKNIX's own ConnMan stores
+   WiFi passwords the same way (plaintext under `/storage`), so this isn't
+   a compromise, it's how this platform already does it. No need to track
+   token lifetime up front either — retry once on a 401 from any
+   authenticated call (Quick Connect again, or `AuthenticateByName` if
+   `-u`/`-p` were given) and replace the stored token, which recovers
+   regardless of *why* the old one died.
+3. **Transcoded streaming + local cache, together** — drop `static=true`,
+   request AAC at a modest bitrate, and as those bytes come back, tee them
+   both to `mpv`'s stdin (for on-the-fly playback) and to a cache file
+   (`item-id.aac`). One download serves both purposes from the start,
+   instead of streaming now and bolting caching on later.
+   - Cache hit: if the file already exists, trust it and play straight from
+     disk — no re-download, no validation. Good enough until corruption or
+     partial files actually show up as a problem.
+   - Early exit: if `mpv` quits before the stream finishes (skip, short
+     track), keep downloading anyway so the cache file still ends up
+     complete.
+   - Location: plain XDG — `$XDG_CACHE_HOME/music`, else `$HOME/.cache/music`.
+     No dedicated override env var; XDG_CACHE_HOME is already one if
+     needed.
+   - Size: the whole cache directory capped at 1 GB (not per file). Once at
+     the cap, stop caching new downloads — playback still works (streamed,
+     just not saved), but nothing is ever auto-deleted. No LRU eviction:
+     deleting something the user expected to still be offline is worse than
+     an occasionally-full cache. Reaching the cap requires noticing and
+     clearing it manually.
+4. **Playback control** — drive `mpv` over its JSON IPC socket instead of
+   blocking on the process, so pause/skip/volume don't require killing and
+   restarting playback.
+5. **Offline sync** — an explicit command to pre-download a chosen album/
+   playlist, so the device can go fully offline rather than only caching
+   what's already been played once. Needs reconciling with step 3's 1 GB
+   cap when it's built: an explicit, deliberate sync arguably shouldn't be
+   silently refused just because opportunistic caching filled the cache
+   first — undecided for now since sync doesn't exist yet.
+
+## Open questions
+
+None right now — see the resolutions folded into the roadmap above. New
+ones will show up once step 1 is actually implemented.
