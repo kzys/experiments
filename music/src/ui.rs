@@ -354,7 +354,24 @@ impl App {
                                 for (idx, name) in names.iter().enumerate() {
                                     let resp = ui.selectable_label(idx == selected, name);
                                     if idx == selected {
-                                        resp.scroll_to_me(Some(egui::Align::Center));
+                                        // Animated scroll_to_me needs several
+                                        // frames to converge, each requiring
+                                        // its own request_repaint — but
+                                        // egui_glow::EguiGlow::run() drops
+                                        // ViewportOutput's repaint_delay, so
+                                        // nothing schedules those frames. The
+                                        // animation stays frozen mid-flight
+                                        // until some unrelated event (any
+                                        // button) happens to trigger the next
+                                        // redraw, which looked like that
+                                        // button continuing the old scroll.
+                                        // Snap instead: no further frames
+                                        // needed to converge, no repaint gap
+                                        // to freeze in.
+                                        resp.scroll_to_me_animation(
+                                            Some(egui::Align::Center),
+                                            egui::style::ScrollAnimation::none(),
+                                        );
                                     }
                                 }
                             },
