@@ -1,8 +1,8 @@
 // music is a gamepad-driven Jellyfin audio client for the RG35xx Plus.
 //
 // Authenticates, then hands off to a fullscreen Wayland UI for browsing
-// artists -> albums -> tracks and playing the selected one through mpv. See
-// PLAN.md for what's next (Quick Connect login, transcoding/caching, etc).
+// albums -> tracks and playing the selected one through mpv. See PLAN.md
+// for what's next (Quick Connect login, transcoding/caching, etc).
 
 mod api;
 mod browse;

@@ -8,9 +8,10 @@ Working:
 
 - Authenticates against a Jellyfin server by username/password
   (`Users/AuthenticateByName`), then opens a fullscreen egui UI (via
-  `egui_glow`/glutin, in a plain `xdg_shell` toplevel) for browsing artists
-  → albums → tracks with the gamepad: D-pad to move, A to select, B to
-  back out a level, Select to quit. Playing a track shells out to `mpv
+  `egui_glow`/glutin, in a plain `xdg_shell` toplevel) for browsing albums
+  → tracks with the gamepad: D-pad to move, A to select, B to back out a
+  level, Select to quit. No artist level — see PLAN.md. Playing a track
+  shells out to `mpv
   --no-video` on its direct-play stream URL and blocks until it exits —
   there's no pause/skip/stop yet (see PLAN.md's playback-control step).
 - Server/username/password come from `-s`/`-u`/`-p` or

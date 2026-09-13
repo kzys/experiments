@@ -4,9 +4,14 @@ A gamepad-driven Jellyfin audio player for the RG35xx Plus.
 
 ## Where this is (v0)
 
-A fullscreen gamepad UI (artists → albums → tracks) authenticates, browses,
-and plays the selection with `mpv` on its direct-play stream URL. See
-README.md for the exact status. Everything below is next.
+A fullscreen gamepad UI (albums → tracks) authenticates, browses, and plays
+the selection with `mpv` on its direct-play stream URL. No artist level:
+Jellyfin's artist tagging on this library is too messy to browse by
+("feat. X" splitting one act into several MusicArtist entries, "VA"
+compilations, most artists tag-only with no folder of their own) — see
+api.rs's list_albums for the full story. Albums don't have that problem,
+being real folders regardless of the tagging above them. See README.md for
+the exact status. Everything below is next.
 
 ## Audio format
 

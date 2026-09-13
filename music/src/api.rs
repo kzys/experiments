@@ -1,6 +1,6 @@
 // A thin client for the slice of the Jellyfin REST API this player needs:
-// authenticate, browse the artist/album/track hierarchy, and build a stream
-// URL. See https://api.jellyfin.org for the full surface.
+// authenticate, browse the album/track hierarchy, and build a stream URL.
+// See https://api.jellyfin.org for the full surface.
 
 use std::time::Duration;
 
@@ -87,24 +87,21 @@ impl Client {
 
     // No paging on any of these: fine for a home library, not for a huge one.
 
-    pub fn list_artists(&self) -> Result<Vec<Item>, String> {
-        self.get_items(&[("IncludeItemTypes", "MusicArtist"), ("Recursive", "true"), ("SortBy", "SortName")])
+    // Deliberately not artist -> album: Jellyfin's artist tagging on this
+    // library is a mess ("feat. X" splitting one act into several distinct
+    // MusicArtist entries, "VA" compilations, etc), and most artists here
+    // are tag-only ("virtual", no folder of their own) rather than a node
+    // in the physical folder tree, which a Recursive Items walk can't see
+    // at all — confirmed IncludeItemTypes=MusicArtist here finds 3 of the
+    // library's real 238 artists. Albums don't have that problem: they're
+    // real folders, so a flat recursive listing gets all of them regardless
+    // of how tangled the artist tagging above them is.
+    pub fn list_albums(&self) -> Result<Vec<Item>, String> {
+        self.get_items(&[("IncludeItemTypes", "MusicAlbum"), ("Recursive", "true"), ("SortBy", "SortName")])
     }
 
-    // ArtistIds (a tag-based relationship), not ParentId (folder-based): a
-    // library's on-disk layout doesn't reliably nest each artist's albums
-    // under one folder, but Jellyfin's own artist/album tagging does.
-    pub fn list_albums(&self, artist_id: &str) -> Result<Vec<Item>, String> {
-        self.get_items(&[
-            ("ArtistIds", artist_id),
-            ("IncludeItemTypes", "MusicAlbum"),
-            ("Recursive", "true"),
-            ("SortBy", "SortName"),
-        ])
-    }
-
-    // ParentId here, unlike artists->albums above: an album's tracks really
-    // do live in one folder, so the folder hierarchy is the right query.
+    // ParentId (folder-based): an album's tracks really do live in one
+    // folder, so the folder hierarchy is the right query here.
     pub fn list_tracks(&self, album_id: &str) -> Result<Vec<Item>, String> {
         self.get_items(&[("ParentId", album_id), ("IncludeItemTypes", "Audio"), ("SortBy", "IndexNumber")])
     }

@@ -1,11 +1,10 @@
-// The artist -> album -> track navigation stack: each frame is one
-// on-screen list, entering an item pushes the next level's list, and B pops
-// back to the previous one.
+// The album -> track navigation stack: each frame is one on-screen list,
+// entering an item pushes the next level's list, and B pops back to the
+// previous one. No artist level — see api.rs's list_albums for why.
 
 use crate::api::{Client, Item};
 
 enum Level {
-    Artists,
     Albums,
     Tracks,
 }
@@ -39,8 +38,8 @@ impl Browser {
     // starts, and owning it outright (rather than borrowing) keeps Browser
     // and everything built on it free of a lifetime parameter.
     pub fn new(client: Client) -> Result<Self, String> {
-        let items = client.list_artists()?;
-        let root = Frame { level: Level::Artists, title: "Artists".to_string(), items, selected: 0 };
+        let items = client.list_albums()?;
+        let root = Frame { level: Level::Albums, title: "Albums".to_string(), items, selected: 0 };
         Ok(Browser { client, stack: vec![root] })
     }
 
@@ -66,11 +65,6 @@ impl Browser {
             return Ok(None);
         };
         match frame.level {
-            Level::Artists => {
-                let items = self.client.list_albums(&item.id)?;
-                self.stack.push(Frame { level: Level::Albums, title: item.name.clone(), items, selected: 0 });
-                Ok(None)
-            }
             Level::Albums => {
                 let items = self.client.list_tracks(&item.id)?;
                 self.stack.push(Frame { level: Level::Tracks, title: item.name.clone(), items, selected: 0 });
@@ -96,7 +90,7 @@ mod tests {
 
     fn frame(len: usize) -> Frame {
         let items = (0..len).map(|i| Item { id: i.to_string(), name: i.to_string() }).collect();
-        Frame { level: Level::Artists, title: String::new(), items, selected: 0 }
+        Frame { level: Level::Albums, title: String::new(), items, selected: 0 }
     }
 
     #[test]
