@@ -158,14 +158,25 @@ fn create_display(
 // egui's default_fonts feature is off (see Cargo.toml) to shave the ~1.4MB
 // of bundled TTFs off the release binary, which leaves egui with no font at
 // all — every label silently draws nothing rather than erroring. ROCKNIX
-// also has no /usr/share/fonts to fall back on, same problem lowkey's
-// Terminal.sh hits for its on-screen keyboard; reuse its fix and point at
-// EmulationStation's own bundled Rubik, present on every ROCKNIX install.
-const FONT_PATH: &str = "/usr/config/emulationstation/resources/Rubik-Regular.ttf";
+// also has no /usr/share/fonts to fall back on, so the UI borrows fonts
+// other bundled apps ship on the read-only system partition, present on
+// every ROCKNIX install.
+//
+// Inconsolata (from PPSSPP's assets) rather than EmulationStation's Rubik:
+// monospace for the classic look, and — the practical reason — tabular
+// digits. egui does no OpenType shaping (no `tnum`), and this Rubik has
+// proportional figures only, so durations and positions wouldn't line up
+// in anything but a fixed-pitch face. Costs nothing in line capacity:
+// 0.5em per glyph, the same as Rubik's average.
+const FONT_PATH: &str = "/usr/config/ppsspp/assets/Inconsolata-Regular.ttf";
 
-// Track and album names often contain CJK text, which Rubik has no glyphs
-// for. Fall back to EmulationStation's own bundled Droid Sans Fallback,
-// present on every ROCKNIX install, for whatever Rubik can't draw.
+// lowkey's on-screen keyboard is told to use this (see start_editing), as
+// its own Terminal.sh does; it has the same no-/usr/share/fonts problem.
+const LOWKEY_FONT_PATH: &str = "/usr/config/emulationstation/resources/Rubik-Regular.ttf";
+
+// Track and album names often contain CJK text, which Inconsolata has no
+// glyphs for. Fall back to EmulationStation's own bundled Droid Sans
+// Fallback for whatever it can't draw.
 const CJK_FONT_PATH: &str = "/usr/config/emulationstation/resources/DroidSansFallbackFull.ttf";
 
 fn load_fonts() -> egui::FontDefinitions {
@@ -174,10 +185,10 @@ fn load_fonts() -> egui::FontDefinitions {
     let cjk_bytes = std::fs::read(CJK_FONT_PATH)
         .unwrap_or_else(|e| die(&format!("cannot read font {CJK_FONT_PATH}: {e}")));
     let mut fonts = egui::FontDefinitions::empty();
-    fonts.font_data.insert("Rubik".to_owned(), Arc::new(egui::FontData::from_owned(bytes)));
+    fonts.font_data.insert("Mono".to_owned(), Arc::new(egui::FontData::from_owned(bytes)));
     fonts.font_data.insert("CJK".to_owned(), Arc::new(egui::FontData::from_owned(cjk_bytes)));
-    fonts.families.insert(egui::FontFamily::Proportional, vec!["Rubik".to_owned(), "CJK".to_owned()]);
-    fonts.families.insert(egui::FontFamily::Monospace, vec!["Rubik".to_owned(), "CJK".to_owned()]);
+    fonts.families.insert(egui::FontFamily::Proportional, vec!["Mono".to_owned(), "CJK".to_owned()]);
+    fonts.families.insert(egui::FontFamily::Monospace, vec!["Mono".to_owned(), "CJK".to_owned()]);
     fonts
 }
 // ---- Theme -----------------------------------------------------------------
@@ -546,7 +557,7 @@ fn start_editing(pad: &Arc<EvdevHandle<File>>, proxy: &winit::event_loop::EventL
     // same problem noted in load_fonts() above, same fix: point it at
     // EmulationStation's bundled Rubik, as lowkey's own Terminal.sh already
     // does for its terminal use case.
-    let mut child = match std::process::Command::new(LOWKEY_BIN).arg("-f").arg(FONT_PATH).spawn() {
+    let mut child = match std::process::Command::new(LOWKEY_BIN).arg("-f").arg(LOWKEY_FONT_PATH).spawn() {
         Ok(c) => c,
         Err(e) => {
             log::warn!("failed to run lowkey: {e}");

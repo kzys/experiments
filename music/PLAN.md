@@ -71,8 +71,10 @@ thread (see pad.rs) — no toolkit here understands gamepads — forwarding
 decoded nav events to the winit event loop over an `EventLoopProxy`.
 
 egui's `default_fonts` feature is off (saves ~1.4MB in the release binary),
-so text is drawn with EmulationStation's bundled Rubik, falling back to its
-bundled Droid Sans Fallback Full for CJK glyphs Rubik doesn't have. Also
+so text is drawn with a font already on the device — originally
+EmulationStation's Rubik, now PPSSPP's Inconsolata (see ui.rs for why) —
+falling back to EmulationStation's Droid Sans Fallback Full for CJK glyphs
+it doesn't have. Also
 not in the original sketch: a `log` crate logger (util.rs) that persists to
 disk and keeps a handful of recent lines visible in an on-screen panel —
 the only way to see what's going wrong on a kiosk device with no console.

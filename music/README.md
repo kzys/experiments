@@ -16,9 +16,10 @@ Working:
   and the power button is grabbed so a stray press can't trigger the OS's
   suspend — playback continues; the volume rocker still works since the
   OS handles it. No artist level — see PLAN.md. Text renders with
-  EmulationStation's bundled Rubik, falling back to its bundled Droid Sans
-  Fallback for CJK glyphs neither Rubik nor egui's own (unbundled, to save
-  binary size) fonts cover.
+  Inconsolata (borrowed from PPSSPP's assets — monospace for tabular digits,
+  which egui can't get from an OpenType feature), falling back to
+  EmulationStation's bundled Droid Sans Fallback for CJK glyphs neither it
+  nor egui's own (unbundled, to save binary size) fonts cover.
 - Playing a track shells out to `mpv --no-video` on its direct-play stream
   URL. Selecting a new track kills whatever's currently playing and spawns
   the next one, and skip does the same with the adjacent track; pause is
