@@ -6,9 +6,7 @@
 
 mod api;
 mod browse;
-mod font;
 mod pad;
-mod render;
 mod ui;
 mod util;
 
@@ -50,8 +48,9 @@ fn main() {
     let args = parse_args();
     let username = args.username.unwrap_or_else(|| util::prompt_line("username: "));
     let password = args.password.unwrap_or_else(|| util::prompt_password("password: "));
-    let client = api::authenticate(&args.server, &username, &password);
 
-    let browser = browse::Browser::new(client);
-    ui::run(browser);
+    // The actual connection attempt happens inside ui::run, once a surface
+    // exists to show a failure on — this device's server sits behind a
+    // flaky Tailscale link, so that's a routine case, not just a startup one.
+    ui::run(args.server, username, password);
 }

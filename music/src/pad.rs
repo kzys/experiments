@@ -9,7 +9,6 @@
 // face buttons that way).
 
 use std::fs::{File, OpenOptions};
-use std::os::unix::fs::OpenOptionsExt;
 
 use input_linux::{sys, EvdevHandle, Key};
 
@@ -51,10 +50,13 @@ pub fn decode(ev: &sys::input_event) -> Option<NavEvent> {
 // Finds an evdev node whose name contains `want`, or the first node
 // advertising a gamepad button when `want` is None. Copied from lowkey's
 // pad.rs (identical logic, no keyboard-specific parts to trim).
+//
+// Opened blocking: this runs on its own reader thread (see ui.rs), which
+// just parks on read() rather than sharing a poll loop with anything else.
 pub fn open_pad(want: Option<&str>) -> Option<EvdevHandle<File>> {
     for i in 0..32 {
         let path = format!("/dev/input/event{i}");
-        let file = match OpenOptions::new().read(true).custom_flags(libc::O_NONBLOCK).open(&path) {
+        let file = match OpenOptions::new().read(true).open(&path) {
             Ok(f) => f,
             Err(_) => continue,
         };

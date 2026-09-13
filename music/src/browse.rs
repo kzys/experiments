@@ -38,10 +38,10 @@ impl Browser {
     // Takes ownership of the client: nothing else needs it once browsing
     // starts, and owning it outright (rather than borrowing) keeps Browser
     // and everything built on it free of a lifetime parameter.
-    pub fn new(client: Client) -> Self {
-        let items = client.list_artists();
+    pub fn new(client: Client) -> Result<Self, String> {
+        let items = client.list_artists()?;
         let root = Frame { level: Level::Artists, title: "Artists".to_string(), items, selected: 0 };
-        Browser { client, stack: vec![root] }
+        Ok(Browser { client, stack: vec![root] })
     }
 
     pub fn stream_url(&self, item_id: &str) -> String {
@@ -57,22 +57,26 @@ impl Browser {
     }
 
     // Enters the selected item: drills into the next level and returns
-    // None, or — already at track level — returns the track to play.
-    pub fn enter(&mut self) -> Option<Item> {
+    // None, or — already at track level — returns the track to play. An
+    // `Err` (the listing request failed) leaves the current frame as-is, so
+    // the caller can show the error without losing the browse position.
+    pub fn enter(&mut self) -> Result<Option<Item>, String> {
         let frame = self.stack.last().expect("browser stack is never empty");
-        let item = frame.items.get(frame.selected)?;
+        let Some(item) = frame.items.get(frame.selected) else {
+            return Ok(None);
+        };
         match frame.level {
             Level::Artists => {
-                let items = self.client.list_albums(&item.id);
+                let items = self.client.list_albums(&item.id)?;
                 self.stack.push(Frame { level: Level::Albums, title: item.name.clone(), items, selected: 0 });
-                None
+                Ok(None)
             }
             Level::Albums => {
-                let items = self.client.list_tracks(&item.id);
+                let items = self.client.list_tracks(&item.id)?;
                 self.stack.push(Frame { level: Level::Tracks, title: item.name.clone(), items, selected: 0 });
-                None
+                Ok(None)
             }
-            Level::Tracks => Some(item.clone()),
+            Level::Tracks => Ok(Some(item.clone())),
         }
     }
 

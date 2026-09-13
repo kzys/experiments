@@ -2,13 +2,20 @@
 // authenticate, browse the artist/album/track hierarchy, and build a stream
 // URL. See https://api.jellyfin.org for the full surface.
 
-use serde::Deserialize;
+use std::time::Duration;
 
-use crate::util::die;
+use serde::Deserialize;
 
 // Identifies this client to the server; doesn't need to be unique per
 // install since Jellyfin only uses it for display (Dashboard > Devices).
 const DEVICE_ID: &str = "rg35xx-music";
+
+// The server sits behind Tailscale for this deployment, which is flaky
+// enough in practice that a hung connection attempt is a real case, not a
+// hypothetical: without a bound, ureq's default is to wait on the OS's own
+// TCP connect timeout (minutes), leaving the kiosk screen blank that whole
+// time. Every request gets this same bound (see authenticate's AgentBuilder).
+const REQUEST_TIMEOUT: Duration = Duration::from_secs(10);
 
 pub struct Client {
     agent: ureq::Agent,
@@ -46,10 +53,11 @@ pub struct Item {
 }
 
 // Authenticates with a username/password and returns a client bound to the
-// resulting user and access token. Panics (via die) on any failure: this is
-// step one of the program, and there's nothing useful to do without it.
-pub fn authenticate(server: &str, username: &str, password: &str) -> Client {
-    let agent = ureq::Agent::new();
+// resulting user and access token. Returns the failure as a message rather
+// than dying outright: the server sitting behind a flaky Tailscale link
+// makes this a routine failure the UI should show, not a startup-only panic.
+pub fn authenticate(server: &str, username: &str, password: &str) -> Result<Client, String> {
+    let agent = ureq::AgentBuilder::new().timeout(REQUEST_TIMEOUT).build();
     let auth_header = format!(
         r#"MediaBrowser Client="music", Device="RG35xx", DeviceId="{DEVICE_ID}", Version="0.1.0""#
     );
@@ -58,40 +66,35 @@ pub fn authenticate(server: &str, username: &str, password: &str) -> Client {
     let resp = agent
         .post(&url)
         .set("X-Emby-Authorization", &auth_header)
-        .send_json(ureq::json!({ "Username": username, "Pw": password }));
+        .send_json(ureq::json!({ "Username": username, "Pw": password }))
+        .map_err(|e| format!("authentication failed: {e}"))?;
+    let auth: AuthResponse = resp.into_json().map_err(|e| format!("bad auth response: {e}"))?;
 
-    let resp = match resp {
-        Ok(r) => r,
-        Err(e) => die(&format!("authentication failed: {e}")),
-    };
-    let auth: AuthResponse = resp.into_json().unwrap_or_else(|e| die(&format!("bad auth response: {e}")));
-
-    Client { agent, server: server.to_string(), token: auth.access_token, user_id: auth.user.id }
+    Ok(Client { agent, server: server.to_string(), token: auth.access_token, user_id: auth.user.id })
 }
 
 impl Client {
-    fn get_items(&self, query: &[(&str, &str)]) -> Vec<Item> {
+    fn get_items(&self, query: &[(&str, &str)]) -> Result<Vec<Item>, String> {
         let url = format!("{}/Users/{}/Items", self.server, self.user_id);
         let mut req = self.agent.get(&url).set("X-Emby-Token", &self.token);
         for (k, v) in query {
             req = req.query(k, v);
         }
-        let resp = req.call().unwrap_or_else(|e| die(&format!("listing items failed: {e}")));
-        let items: ItemsResponse =
-            resp.into_json().unwrap_or_else(|e| die(&format!("bad items response: {e}")));
-        items.items
+        let resp = req.call().map_err(|e| format!("listing items failed: {e}"))?;
+        let items: ItemsResponse = resp.into_json().map_err(|e| format!("bad items response: {e}"))?;
+        Ok(items.items)
     }
 
     // No paging on any of these: fine for a home library, not for a huge one.
 
-    pub fn list_artists(&self) -> Vec<Item> {
+    pub fn list_artists(&self) -> Result<Vec<Item>, String> {
         self.get_items(&[("IncludeItemTypes", "MusicArtist"), ("Recursive", "true"), ("SortBy", "SortName")])
     }
 
     // ArtistIds (a tag-based relationship), not ParentId (folder-based): a
     // library's on-disk layout doesn't reliably nest each artist's albums
     // under one folder, but Jellyfin's own artist/album tagging does.
-    pub fn list_albums(&self, artist_id: &str) -> Vec<Item> {
+    pub fn list_albums(&self, artist_id: &str) -> Result<Vec<Item>, String> {
         self.get_items(&[
             ("ArtistIds", artist_id),
             ("IncludeItemTypes", "MusicAlbum"),
@@ -102,7 +105,7 @@ impl Client {
 
     // ParentId here, unlike artists->albums above: an album's tracks really
     // do live in one folder, so the folder hierarchy is the right query.
-    pub fn list_tracks(&self, album_id: &str) -> Vec<Item> {
+    pub fn list_tracks(&self, album_id: &str) -> Result<Vec<Item>, String> {
         self.get_items(&[("ParentId", album_id), ("IncludeItemTypes", "Audio"), ("SortBy", "IndexNumber")])
     }
 
