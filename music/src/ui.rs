@@ -213,7 +213,9 @@ const FIELD_BG: egui::Color32 = egui::Color32::from_rgb(0x23, 0x23, 0x23);
 const LOG_WARN: egui::Color32 = egui::Color32::from_rgb(0xd0, 0xa0, 0x30);
 const LOG_ERROR: egui::Color32 = egui::Color32::from_rgb(0xe0, 0x5a, 0x5a);
 
-const FS_LG: f32 = 30.0;
+// One size for everything, title included: the mockups had a 30px title,
+// but a single-size monospace grid reads more like the classic players
+// this is after.
 const FS_MD: f32 = 20.0;
 const SIDE: i8 = 32; // horizontal padding of every panel
 // Space left of the list for the play marker, which sits outside the row.
@@ -235,7 +237,7 @@ fn apply_theme(ctx: &egui::Context) {
     ctx.set_zoom_factor(ZOOM);
     ctx.all_styles_mut(|style| {
         style.text_styles = [
-            (TextStyle::Heading, FontId::new(FS_LG, Proportional)),
+            (TextStyle::Heading, FontId::new(FS_MD, Proportional)),
             (TextStyle::Body, FontId::new(FS_MD, Proportional)),
             (TextStyle::Button, FontId::new(FS_MD, Proportional)),
             (TextStyle::Small, FontId::new(FS_MD, Proportional)),
@@ -319,27 +321,13 @@ enum Marker {
     Paused,
 }
 
+// Text, not a drawn glyph: the same "> " a terminal player would print.
 fn draw_marker(painter: &egui::Painter, center: egui::Pos2, marker: Marker) {
-    let s = 7.0; // half the marker's 14px box
-    match marker {
-        Marker::Playing => {
-            let pts = vec![
-                egui::pos2(center.x - s + 1.5, center.y - s + 1.0),
-                egui::pos2(center.x + s - 1.0, center.y),
-                egui::pos2(center.x - s + 1.5, center.y + s - 1.0),
-            ];
-            painter.add(egui::Shape::convex_polygon(pts, SEL_BORDER, egui::Stroke::NONE));
-        }
-        Marker::Paused => {
-            for dx in [-4.5, 1.5] {
-                let r = egui::Rect::from_min_size(
-                    egui::pos2(center.x + dx, center.y - s + 1.0),
-                    egui::vec2(3.0, 2.0 * s - 2.0),
-                );
-                painter.rect_filled(r, 0.0, SEL_BORDER);
-            }
-        }
-    }
+    let text = match marker {
+        Marker::Playing => ">",
+        Marker::Paused => "||",
+    };
+    painter.text(center, egui::Align2::CENTER_CENTER, text, body_font(), SEL_BORDER);
 }
 
 // One list row: `left` text, `right` (count or duration) flush to the right
