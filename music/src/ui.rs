@@ -145,13 +145,21 @@ fn create_display(
 // EmulationStation's own bundled Rubik, present on every ROCKNIX install.
 const FONT_PATH: &str = "/usr/config/emulationstation/resources/Rubik-Regular.ttf";
 
+// Track and album names often contain CJK text, which Rubik has no glyphs
+// for. Fall back to EmulationStation's own bundled Droid Sans Fallback,
+// present on every ROCKNIX install, for whatever Rubik can't draw.
+const CJK_FONT_PATH: &str = "/usr/config/emulationstation/resources/DroidSansFallbackFull.ttf";
+
 fn load_fonts() -> egui::FontDefinitions {
     let bytes =
         std::fs::read(FONT_PATH).unwrap_or_else(|e| die(&format!("cannot read font {FONT_PATH}: {e}")));
+    let cjk_bytes = std::fs::read(CJK_FONT_PATH)
+        .unwrap_or_else(|e| die(&format!("cannot read font {CJK_FONT_PATH}: {e}")));
     let mut fonts = egui::FontDefinitions::empty();
     fonts.font_data.insert("Rubik".to_owned(), Arc::new(egui::FontData::from_owned(bytes)));
-    fonts.families.insert(egui::FontFamily::Proportional, vec!["Rubik".to_owned()]);
-    fonts.families.insert(egui::FontFamily::Monospace, vec!["Rubik".to_owned()]);
+    fonts.font_data.insert("CJK".to_owned(), Arc::new(egui::FontData::from_owned(cjk_bytes)));
+    fonts.families.insert(egui::FontFamily::Proportional, vec!["Rubik".to_owned(), "CJK".to_owned()]);
+    fonts.families.insert(egui::FontFamily::Monospace, vec!["Rubik".to_owned(), "CJK".to_owned()]);
     fonts
 }
 
