@@ -10,10 +10,17 @@ Working:
   (`Users/AuthenticateByName`), then opens a fullscreen egui UI (via
   `egui_glow`/glutin, in a plain `xdg_shell` toplevel) for browsing albums
   → tracks with the gamepad: D-pad to move, A to select, B to back out a
-  level, Select to quit. No artist level — see PLAN.md. Playing a track
-  shells out to `mpv
-  --no-video` on its direct-play stream URL and blocks until it exits —
-  there's no pause/skip/stop yet (see PLAN.md's playback-control step).
+  level, Select to quit. No artist level — see PLAN.md. Text renders with
+  EmulationStation's bundled Rubik, falling back to its bundled Droid Sans
+  Fallback for CJK glyphs neither Rubik nor egui's own (unbundled, to save
+  binary size) fonts cover.
+- Playing a track shells out to `mpv --no-video` on its direct-play stream
+  URL. Selecting a new track kills whatever's currently playing and spawns
+  the next one; there's still no pause/skip/volume without a restart — that
+  needs mpv's JSON IPC socket (see PLAN.md's playback-control step).
+- A handful of the most recent log lines are always visible on screen (log
+  panel), and the full log is persisted to disk — the only way to see
+  what's going wrong on a kiosk device with no console.
 - Server/username/password come from `-s`/`-u`/`-p` or
   `$JELLYFIN_SERVER`/`$JELLYFIN_USER`/`$JELLYFIN_PASSWORD`, so the password
   needn't land in shell history.

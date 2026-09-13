@@ -70,6 +70,13 @@ like lowkey. Evdev reads for the pad still happen directly on their own
 thread (see pad.rs) — no toolkit here understands gamepads — forwarding
 decoded nav events to the winit event loop over an `EventLoopProxy`.
 
+egui's `default_fonts` feature is off (saves ~1.4MB in the release binary),
+so text is drawn with EmulationStation's bundled Rubik, falling back to its
+bundled Droid Sans Fallback Full for CJK glyphs Rubik doesn't have. Also
+not in the original sketch: a `log` crate logger (util.rs) that persists to
+disk and keeps a handful of recent lines visible in an on-screen panel —
+the only way to see what's going wrong on a kiosk device with no console.
+
 ### Text input (server address, etc.)
 
 Don't build an on-screen keyboard into this app — delegate to lowkey (or
@@ -134,9 +141,12 @@ any compatible software keyboard), shown and hidden the way iOS/Android do:
      deleting something the user expected to still be offline is worse than
      an occasionally-full cache. Reaching the cap requires noticing and
      clearing it manually.
-4. **Playback control** — drive `mpv` over its JSON IPC socket instead of
-   blocking on the process, so pause/skip/volume don't require killing and
-   restarting playback.
+4. **Playback control** — partially done: selecting a track no longer
+   blocks the event loop (`mpv` is spawned rather than waited on), but
+   changing tracks still kills the old process and starts a new one. Actual
+   pause/skip/volume without a restart still needs driving a single
+   long-lived `mpv` over its JSON IPC socket (`--input-ipc-server`) instead
+   of one process per track — not yet built.
 5. **Offline sync** — an explicit command to pre-download a chosen album/
    playlist, so the device can go fully offline rather than only caching
    what's already been played once. Needs reconciling with step 3's 1 GB
