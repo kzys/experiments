@@ -79,11 +79,11 @@ the only way to see what's going wrong on a kiosk device with no console.
 
 ### Text input (server address, etc.)
 
-Built for the server address field on the "Can't reach server" screen (`A`
-to edit, `Select` on lowkey when finished); not yet run on the device.
-Delegates to lowkey (or any compatible software keyboard) rather than
-building an on-screen keyboard into this app, shown and hidden the way
-iOS/Android do:
+Done for the server address field on the "Can't reach server" screen (`A`
+to edit, `Select` on lowkey when finished); confirmed working end-to-end on
+the device. Delegates to lowkey (or any compatible software keyboard)
+rather than building an on-screen keyboard into this app, shown and hidden
+the way iOS/Android do:
 
 - lowkey never takes Wayland keyboard focus itself
   (`KeyboardInteractivity::None`) and types through a `uinput` virtual
@@ -100,12 +100,16 @@ iOS/Android do:
   keep going ungrabbed" handling — sit on screen deaf to button presses.
   Fixed by releasing our grab before spawning lowkey and reacquiring it once
   lowkey's process exits.
+- ROCKNIX has no `/usr/share/fonts`, so lowkey's own default font path
+  doesn't exist on-device either — it died on spawn until fixed the same
+  way `load_fonts()` above is: `-f` pointed at EmulationStation's bundled
+  Rubik, the same font lowkey's own Terminal.sh already uses for this
+  reason.
 - lowkey requests the wlr-layer-shell *Overlay* layer specifically because,
   per its own source comment, "EmulationStation runs fullscreen, and sway
-  draws fullscreen surfaces over everything below overlay" — so it should
-  already draw on top of our fullscreen surface without our layout needing
-  to reflow. Inferred, not yet verified on the device against our actual
-  (now egui+glow) fullscreen surface.
+  draws fullscreen surfaces over everything below overlay" — confirmed on
+  the device: it draws on top of our egui+glow fullscreen surface with no
+  layout changes needed on our side.
 - No custom evdev-keycode → ASCII table needed: now that the UI goes
   through winit rather than raw `wayland-client`, incoming `wl_keyboard`
   events already arrive as decoded text via winit's own `xkbcommon` use —
