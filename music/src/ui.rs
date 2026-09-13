@@ -33,12 +33,14 @@ fn server_field_id() -> egui::Id {
     egui::Id::new("server_address")
 }
 
-// The event loop's user event: decoded gamepad nav events, plus the one
-// other async signal the UI reacts to — lowkey (the delegated on-screen
-// keyboard) exiting once the user is done editing.
+// The event loop's user event: decoded gamepad nav events, plus the other
+// async signals the UI reacts to — lowkey (the delegated on-screen keyboard)
+// exiting once the user is done editing, and egui asking for a repaint
+// (see App::resumed).
 enum AppEvent {
     Nav(NavEvent),
     LowkeyExited,
+    Repaint(std::time::Duration),
 }
 
 struct GlutinWindowContext {
@@ -398,10 +400,19 @@ impl Playing {
     }
 
     // Approximate: time since mpv was spawned, minus pauses. Doesn't know
-    // about buffering, and is only refreshed when something else triggers a
-    // redraw. Reading mpv's real position needs its JSON IPC — see TODO.md.
+    // about buffering. Reading mpv's real position needs its JSON IPC — see
+    // TODO.md.
     fn position(&self) -> std::time::Duration {
         if self.paused { self.played } else { self.played + self.started.elapsed() }
+    }
+
+    // How long until the displayed position (whole seconds) next changes.
+    fn until_next_second(&self) -> Option<std::time::Duration> {
+        if self.paused {
+            return None;
+        }
+        let pos = self.position();
+        Some(std::time::Duration::from_secs(pos.as_secs() + 1) - pos)
     }
 
     fn marker(&self) -> Marker {
@@ -684,8 +695,19 @@ impl App {
                     })
                     .collect();
                 let selected = frame.selected;
+                // The position counter, if one is on screen, needs a frame
+                // of its own each second; nothing else here changes without
+                // input.
+                let tick = self
+                    .playing
+                    .as_ref()
+                    .filter(|p| at_tracks && frame.items.iter().any(|item| item.id == p.item().id))
+                    .and_then(Playing::until_next_second);
 
                 egui_glow.run(window, |ui| {
+                    if let Some(delay) = tick {
+                        ui.ctx().request_repaint_after(delay);
+                    }
                     draw_title(ui, &title);
                     draw_legend(ui, if at_tracks { LEGEND_TRACKS } else { LEGEND_ALBUMS });
                     draw_log_panel(ui, &log_lines);
@@ -716,20 +738,9 @@ impl App {
                                 for (idx, (name, right, marker)) in rows.iter().enumerate() {
                                     let resp = draw_row(ui, idx == selected, name, right, *marker);
                                     if idx == selected {
-                                        // Animated scroll_to_me needs several
-                                        // frames to converge, each requiring
-                                        // its own request_repaint — but
-                                        // egui_glow::EguiGlow::run() drops
-                                        // ViewportOutput's repaint_delay, so
-                                        // nothing schedules those frames. The
-                                        // animation stays frozen mid-flight
-                                        // until some unrelated event (any
-                                        // button) happens to trigger the next
-                                        // redraw, which looked like that
-                                        // button continuing the old scroll.
-                                        // Snap instead: no further frames
-                                        // needed to converge, no repaint gap
-                                        // to freeze in.
+                                        // Snap rather than animate: under
+                                        // d-pad auto-repeat an animated
+                                        // scroll never gets to settle.
                                         resp.scroll_to_me_animation(
                                             Some(egui::Align::Center),
                                             egui::style::ScrollAnimation::none(),
@@ -825,12 +836,32 @@ impl App {
 }
 
 impl winit::application::ApplicationHandler<AppEvent> for App {
+    fn new_events(&mut self, event_loop: &winit::event_loop::ActiveEventLoop, cause: winit::event::StartCause) {
+        if let winit::event::StartCause::ResumeTimeReached { .. } = cause {
+            // The delayed repaint's timer (see AppEvent::Repaint). Back to
+            // plain Wait, or the lapsed deadline would wake us every turn.
+            event_loop.set_control_flow(winit::event_loop::ControlFlow::Wait);
+            if !self.held && let Some(gl_window) = &self.gl_window {
+                gl_window.window().request_redraw();
+            }
+        }
+    }
+
     fn resumed(&mut self, event_loop: &winit::event_loop::ActiveEventLoop) {
         let (gl_window, gl) = create_display(event_loop);
         let gl = Arc::new(gl);
         gl_window.window().set_visible(true);
 
         let egui_glow = egui_glow::EguiGlow::new(event_loop, Arc::clone(&gl), None, None, true);
+        // EguiGlow::run() drops the repaint delay egui reports per pass, and
+        // without this callback egui has no other way to ask for a frame —
+        // its own animations (scrolling, cursor blink, hover fades) and
+        // request_repaint_after timers would stall until some input event
+        // happened to trigger the next redraw.
+        let proxy = self.proxy.clone();
+        egui_glow.egui_ctx.set_request_repaint_callback(move |info| {
+            proxy.send_event(AppEvent::Repaint(info.delay)).ok();
+        });
         egui_glow.egui_ctx.set_fonts(load_fonts());
         apply_theme(&egui_glow.egui_ctx);
         self.egui_glow = Some(egui_glow);
@@ -890,6 +921,24 @@ impl winit::application::ApplicationHandler<AppEvent> for App {
                 if let Some(gl_window) = &self.gl_window {
                     gl_window.window().request_redraw();
                 }
+                return;
+            }
+            // Nothing to show while held (see the Nav case below); any
+            // pending timer is simply left to lapse.
+            AppEvent::Repaint(_) if self.held => return,
+            AppEvent::Repaint(delay) if delay.is_zero() => {
+                if let Some(gl_window) = &self.gl_window {
+                    gl_window.window().request_redraw();
+                }
+                return;
+            }
+            AppEvent::Repaint(delay) => {
+                // Within a pass egui only reports a delay shorter than the
+                // one before, and each pass re-requests whatever it still
+                // needs, so the latest is the one to keep. Fires as
+                // StartCause::ResumeTimeReached (see new_events).
+                let at = std::time::Instant::now() + delay;
+                event_loop.set_control_flow(winit::event_loop::ControlFlow::WaitUntil(at));
                 return;
             }
             AppEvent::Nav(ev) => ev,
