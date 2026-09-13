@@ -1,16 +1,33 @@
+use std::collections::VecDeque;
 use std::io::{self, BufRead, Write};
 use std::path::PathBuf;
+use std::sync::Mutex;
 
 pub fn die(msg: &str) -> ! {
     eprintln!("{msg}");
     std::process::exit(1);
 }
 
+// How many recent lines the on-screen log panel shows (see ui.rs); older
+// ones still make it to stderr and the log file, just not the screen.
+const VISIBLE_LINES: usize = 6;
+
+static RECENT: Mutex<VecDeque<String>> = Mutex::new(VecDeque::new());
+
+// A snapshot of the last few log lines, for ui.rs to paint on screen —
+// there's no other way to see what's going wrong on a kiosk device with no
+// console attached.
+pub fn recent_lines() -> Vec<String> {
+    RECENT.lock().unwrap().iter().cloned().collect()
+}
+
 // Launched as an EmulationStation Ports script, this has no console for
 // eprintln! to reach — stderr just gets swallowed. So `log`'s output (used
 // throughout via its info!/warn!/error! macros) also gets appended to a
 // file under XDG_STATE_HOME, the only way to see what happened after the
-// fact (e.g. over ssh). No env_logger/etc: those assume a real terminal.
+// fact (e.g. over ssh), and kept in a small in-memory ring buffer the UI
+// paints directly on screen. No env_logger/etc: those assume a real
+// terminal.
 struct FileLogger;
 
 impl log::Log for FileLogger {
@@ -25,6 +42,13 @@ impl log::Log for FileLogger {
             .unwrap_or(0);
         let line = format!("[{secs}] {} {}", record.level(), record.args());
         eprintln!("{line}");
+
+        let mut recent = RECENT.lock().unwrap();
+        recent.push_back(line.clone());
+        while recent.len() > VISIBLE_LINES {
+            recent.pop_front();
+        }
+        drop(recent);
 
         let path = log_path();
         if let Some(dir) = path.parent() {

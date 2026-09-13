@@ -19,6 +19,10 @@ pub enum NavEvent {
     Select,
     Back,
     Quit,
+    // No navigation effect; just asks for a redraw. Used to get a just-logged
+    // message (e.g. the reader thread dying) on screen instead of the app
+    // going quiet with nothing to show for it.
+    Refresh,
 }
 
 pub fn decode(ev: &sys::input_event) -> Option<NavEvent> {

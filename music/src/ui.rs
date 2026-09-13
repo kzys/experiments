@@ -189,10 +189,24 @@ struct App {
     state: Option<State>,
 }
 
+// A handful of the most recent log lines (see util.rs), always visible: the
+// only way to see what's going wrong on a kiosk device with no console.
+fn draw_log_panel(ui: &mut egui::Ui, lines: &[String]) {
+    if lines.is_empty() {
+        return;
+    }
+    egui::Panel::bottom("log").show(ui, |ui| {
+        for line in lines {
+            ui.small(line);
+        }
+    });
+}
+
 impl App {
     fn redraw(&mut self) {
         let egui_glow = self.egui_glow.as_mut().unwrap();
         let window = self.gl_window.as_ref().unwrap().window();
+        let log_lines = crate::util::recent_lines();
 
         match self.state.as_ref().unwrap() {
             State::Error(message) => {
@@ -205,6 +219,7 @@ impl App {
                     egui::Panel::bottom("legend").show(ctx, |ui| {
                         ui.weak("Select: quit");
                     });
+                    draw_log_panel(ctx, &log_lines);
                 });
             }
             State::Browsing(browser) => {
@@ -220,6 +235,7 @@ impl App {
                     egui::Panel::bottom("legend").show(ctx, |ui| {
                         ui.weak(LEGEND);
                     });
+                    draw_log_panel(ctx, &log_lines);
                     egui::CentralPanel::default().show(ctx, |ui| {
                         egui::ScrollArea::vertical().auto_shrink([false, false]).show(ui, |ui| {
                             if names.is_empty() {
@@ -331,6 +347,7 @@ impl winit::application::ApplicationHandler<NavEvent> for App {
                         self.state = Some(State::Error(e));
                     }
                 },
+                NavEvent::Refresh => {}
                 NavEvent::Quit => unreachable!(),
             }
         }
@@ -363,6 +380,7 @@ pub fn run(server: String, username: String, password: String) {
     std::thread::spawn(move || loop {
         let Some(events) = pad::read_pad(&pad) else {
             log::error!("gamepad reader: read error, giving up");
+            proxy.send_event(NavEvent::Refresh).ok();
             return;
         };
         for ev in events {
