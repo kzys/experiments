@@ -252,7 +252,12 @@ fn start_editing(pad: &Arc<EvdevHandle<File>>, proxy: &winit::event_loop::EventL
     if let Err(e) = pad.grab(false) {
         log::warn!("EVIOCGRAB release: {e}");
     }
-    let mut child = match std::process::Command::new(LOWKEY_BIN).spawn() {
+    // ROCKNIX has no /usr/share/fonts, so lowkey's own default font path
+    // doesn't exist on-device (it dies immediately if asked to read it) —
+    // same problem noted in load_fonts() above, same fix: point it at
+    // EmulationStation's bundled Rubik, as lowkey's own Terminal.sh already
+    // does for its terminal use case.
+    let mut child = match std::process::Command::new(LOWKEY_BIN).arg("-f").arg(FONT_PATH).spawn() {
         Ok(c) => c,
         Err(e) => {
             log::warn!("failed to run lowkey: {e}");
