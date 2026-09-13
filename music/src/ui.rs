@@ -674,8 +674,13 @@ impl App {
                     .iter()
                     .map(|item| {
                         let playing = self.playing.as_ref().filter(|p| p.item().id == item.id);
+                        // Number right-aligned in a 4-wide column (so up to
+                        // 9999) and an untagged track blanked to the same
+                        // width, keeping the names in a column of their
+                        // own — exact, since the font is monospace.
                         let name = match item.index_number {
-                            Some(n) if at_tracks => format!("{n}. {}", item.name),
+                            Some(n) if at_tracks => format!("{n:>4}. {}", item.name),
+                            None if at_tracks => format!("      {}", item.name),
                             _ => item.name.clone(),
                         };
                         let right = if at_tracks {
