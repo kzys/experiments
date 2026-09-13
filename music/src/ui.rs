@@ -351,10 +351,9 @@ pub fn run(server: String, username: String, password: String) {
     let proxy = event_loop.create_proxy();
 
     std::thread::spawn(move || loop {
-        let events = pad::read_pad(&pad);
-        if events.is_empty() {
+        let Some(events) = pad::read_pad(&pad) else {
             return; // pad gone
-        }
+        };
         for ev in events {
             if proxy.send_event(ev).is_err() {
                 return; // event loop shut down

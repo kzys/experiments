@@ -80,11 +80,12 @@ pub fn open_pad(want: Option<&str>) -> Option<EvdevHandle<File>> {
     None
 }
 
-pub fn read_pad(pad: &EvdevHandle<File>) -> Vec<NavEvent> {
+// None means the pad is actually gone (a read error). An empty Vec is the
+// common case, not a sign of that: most raw reads decode to nothing at all
+// (EV_SYN, key releases, a hat axis re-centering all hit decode's `None`
+// arms) even though the device is perfectly fine.
+pub fn read_pad(pad: &EvdevHandle<File>) -> Option<Vec<NavEvent>> {
     let mut evs: [sys::input_event; 32] = unsafe { std::mem::zeroed() };
-    let n = match pad.read(&mut evs) {
-        Ok(n) => n,
-        Err(_) => return Vec::new(),
-    };
-    evs[..n].iter().filter_map(decode).collect()
+    let n = pad.read(&mut evs).ok()?;
+    Some(evs[..n].iter().filter_map(decode).collect())
 }
