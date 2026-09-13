@@ -45,9 +45,12 @@ fn parse_args() -> Args {
 }
 
 fn main() {
+    util::init_logging();
     let args = parse_args();
     let username = args.username.unwrap_or_else(|| util::prompt_line("username: "));
     let password = args.password.unwrap_or_else(|| util::prompt_password("password: "));
+
+    log::info!("starting: server={} user={username}", args.server);
 
     // The actual connection attempt happens inside ui::run, once a surface
     // exists to show a failure on — this device is on a flaky WiFi link,

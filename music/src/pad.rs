@@ -73,7 +73,7 @@ pub fn open_pad(want: Option<&str>) -> Option<EvdevHandle<File>> {
             None => handle.key_bits().map(|b| b.get(Key::ButtonSouth)).unwrap_or(false),
         };
         if found {
-            eprintln!("pad: {name} ({path})");
+            log::info!("pad: {name} ({path})");
             return Some(handle);
         }
     }

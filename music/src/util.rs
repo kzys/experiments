@@ -1,8 +1,55 @@
 use std::io::{self, BufRead, Write};
+use std::path::PathBuf;
 
 pub fn die(msg: &str) -> ! {
     eprintln!("{msg}");
     std::process::exit(1);
+}
+
+// Launched as an EmulationStation Ports script, this has no console for
+// eprintln! to reach — stderr just gets swallowed. So `log`'s output (used
+// throughout via its info!/warn!/error! macros) also gets appended to a
+// file under XDG_STATE_HOME, the only way to see what happened after the
+// fact (e.g. over ssh). No env_logger/etc: those assume a real terminal.
+struct FileLogger;
+
+impl log::Log for FileLogger {
+    fn enabled(&self, _metadata: &log::Metadata) -> bool {
+        true
+    }
+
+    fn log(&self, record: &log::Record) {
+        let secs = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|d| d.as_secs())
+            .unwrap_or(0);
+        let line = format!("[{secs}] {} {}", record.level(), record.args());
+        eprintln!("{line}");
+
+        let path = log_path();
+        if let Some(dir) = path.parent() {
+            let _ = std::fs::create_dir_all(dir);
+        }
+        if let Ok(mut f) = std::fs::OpenOptions::new().create(true).append(true).open(&path) {
+            let _ = writeln!(f, "{line}");
+        }
+    }
+
+    fn flush(&self) {}
+}
+
+fn log_path() -> PathBuf {
+    let dir = std::env::var("XDG_STATE_HOME").map(PathBuf::from).unwrap_or_else(|_| {
+        PathBuf::from(std::env::var("HOME").unwrap_or_default()).join(".local/state")
+    });
+    dir.join("music/log")
+}
+
+static LOGGER: FileLogger = FileLogger;
+
+pub fn init_logging() {
+    log::set_logger(&LOGGER).ok();
+    log::set_max_level(log::LevelFilter::Info);
 }
 
 pub fn prompt_line(prompt: &str) -> String {

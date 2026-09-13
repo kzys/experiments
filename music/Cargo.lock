@@ -1062,6 +1062,7 @@ dependencies = [
  "glutin-winit",
  "input-linux",
  "libc",
+ "log",
  "serde",
  "serde_json",
  "ureq",

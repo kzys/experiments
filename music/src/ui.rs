@@ -161,9 +161,10 @@ fn load_fonts() -> egui::FontDefinitions {
 // the track (see PLAN.md's playback-control step).
 fn play(browser: &Browser, item: &Item) {
     let url = browser.stream_url(&item.id);
+    log::info!("playing {} ({})", item.name, item.id);
     match std::process::Command::new("mpv").arg("--no-video").arg(&url).status() {
-        Ok(status) if !status.success() => eprintln!("mpv exited with {status}"),
-        Err(e) => eprintln!("failed to run mpv: {e}"),
+        Ok(status) if !status.success() => log::warn!("mpv exited with {status}"),
+        Err(e) => log::warn!("failed to run mpv: {e}"),
         Ok(_) => {}
     }
 }
@@ -264,8 +265,14 @@ impl winit::application::ApplicationHandler<NavEvent> for App {
         // message instead of the process dying with nothing to see.
         self.state = Some(
             match api::authenticate(&self.server, &self.username, &self.password).and_then(Browser::new) {
-                Ok(browser) => State::Browsing(browser),
-                Err(e) => State::Error(e),
+                Ok(browser) => {
+                    log::info!("authenticated, browsing");
+                    State::Browsing(browser)
+                }
+                Err(e) => {
+                    log::error!("startup failed: {e}");
+                    State::Error(e)
+                }
             },
         );
 
@@ -319,7 +326,10 @@ impl winit::application::ApplicationHandler<NavEvent> for App {
                 NavEvent::Select => match browser.enter() {
                     Ok(Some(item)) => play(browser, &item),
                     Ok(None) => {}
-                    Err(e) => self.state = Some(State::Error(e)),
+                    Err(e) => {
+                        log::error!("browse failed: {e}");
+                        self.state = Some(State::Error(e));
+                    }
                 },
                 NavEvent::Quit => unreachable!(),
             }
@@ -342,7 +352,7 @@ pub fn run(server: String, username: String, password: String) {
     // app is fullscreen on top of it, not replacing it), and would
     // otherwise also react to the same button presses.
     if let Err(e) = pad.grab(true) {
-        eprintln!("EVIOCGRAB: {e}");
+        log::warn!("EVIOCGRAB: {e}");
     }
 
     let event_loop = winit::event_loop::EventLoop::<NavEvent>::with_user_event()
@@ -352,7 +362,8 @@ pub fn run(server: String, username: String, password: String) {
 
     std::thread::spawn(move || loop {
         let Some(events) = pad::read_pad(&pad) else {
-            return; // pad gone
+            log::error!("gamepad reader: read error, giving up");
+            return;
         };
         for ev in events {
             if proxy.send_event(ev).is_err() {
