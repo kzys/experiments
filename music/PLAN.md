@@ -155,12 +155,11 @@ the way iOS/Android do:
      deleting something the user expected to still be offline is worse than
      an occasionally-full cache. Reaching the cap requires noticing and
      clearing it manually.
-4. **Playback control** — partially done: selecting a track no longer
-   blocks the event loop (`mpv` is spawned rather than waited on), but
-   changing tracks still kills the old process and starts a new one. Actual
-   pause/skip/volume without a restart still needs driving a single
-   long-lived `mpv` over its JSON IPC socket (`--input-ipc-server`) instead
-   of one process per track — not yet built.
+4. **Playback control** — mostly done: a single long-lived `mpv` is driven
+   over its JSON IPC socket (`--input-ipc-server`, see mpv.rs). Selecting
+   a track loads it and the rest of the album as mpv's playlist, so
+   playback runs to the end of the album on its own; pause and the
+   position shown come from mpv's own state. Volume control isn't built.
 5. **Offline sync** — an explicit command to pre-download a chosen album/
    playlist, so the device can go fully offline rather than only caching
    what's already been played once. Needs reconciling with step 3's 1 GB

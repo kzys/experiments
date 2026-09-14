@@ -20,13 +20,14 @@ Working:
   which egui can't get from an OpenType feature), falling back to
   EmulationStation's bundled Droid Sans Fallback for CJK glyphs neither it
   nor egui's own (unbundled, to save binary size) fonts cover.
-- Playing a track shells out to `mpv --no-video` on its stream URL, which
-  asks Jellyfin to transcode to 128kbps AAC on the fly so the original
-  (FLAC, mostly) never crosses the WiFi. Nothing is cached yet (see PLAN.md).
-  Selecting a new track kills whatever's currently playing and spawns
-  the next one, and skip does the same with the adjacent track; pause is
-  SIGSTOP/SIGCONT on that process. Doing this properly needs mpv's JSON
-  IPC socket (see PLAN.md's playback-control step and TODO.md).
+- Playback is one long-lived `mpv --no-video --idle` driven over its JSON
+  IPC socket (mpv.rs). Selecting a track loads it and the rest of the
+  album into mpv's playlist as stream URLs, which ask Jellyfin to
+  transcode to 128kbps AAC on the fly so the original (FLAC, mostly) never
+  crosses the WiFi; mpv then plays through to the end of the album by
+  itself. Nothing is cached yet (see PLAN.md). Skip reloads the playlist
+  from the adjacent track; pause, the position counter and the ▶ marker
+  follow what mpv reports back over the socket.
 - A handful of the most recent log lines are always visible on screen (log
   panel), and the full log is persisted to disk — the only way to see
   what's going wrong on a kiosk device with no console.

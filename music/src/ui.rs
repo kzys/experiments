@@ -20,6 +20,7 @@ use winit::raw_window_handle::HasWindowHandle as _;
 
 use crate::api::{self, Item};
 use crate::browse::Browser;
+use crate::mpv::Mpv;
 use crate::pad::{self, NavEvent};
 use crate::util::die;
 
@@ -35,11 +36,13 @@ fn server_field_id() -> egui::Id {
 
 // The event loop's user event: decoded gamepad nav events, plus the other
 // async signals the UI reacts to — lowkey (the delegated on-screen keyboard)
-// exiting once the user is done editing, egui asking for a repaint (see
-// App::resumed), and SIGTERM/SIGINT (see watch_signals).
+// exiting once the user is done editing, mpv reporting playback state (see
+// mpv.rs), egui asking for a repaint (see App::resumed), and SIGTERM/SIGINT
+// (see watch_signals).
 enum AppEvent {
     Nav(NavEvent),
     LowkeyExited,
+    Mpv(crate::mpv::Event),
     Repaint(std::time::Duration),
     Terminate,
 }
@@ -386,15 +389,16 @@ fn fmt_duration(secs: u64) -> String {
 
 // ---- Playback ----------------------------------------------------------------
 
-// What's playing right now. Carries its own copy of the album's track list
-// so L1/R1 can step through it regardless of where the browser has moved
-// since — backing out to Albums doesn't lose the skip targets.
+// What's playing right now, as mpv reports it (see mpv.rs). Carries its
+// own copy of the album's track list so L1/R1 can step through it
+// regardless of where the browser has moved since — backing out to Albums
+// doesn't lose the skip targets. mpv's playlist is the album from the
+// chosen track to the end, so its entry n is tracks[first + n].
 struct Playing {
     tracks: Vec<Item>,
+    first: usize,
     index: usize,
-    started: std::time::Instant,
-    // Time played before the current pause/resume cycle.
-    played: std::time::Duration,
+    position: std::time::Duration,
     paused: bool,
 }
 
@@ -403,51 +407,8 @@ impl Playing {
         &self.tracks[self.index]
     }
 
-    // Approximate: time since mpv was spawned, minus pauses. Doesn't know
-    // about buffering. Reading mpv's real position needs its JSON IPC — see
-    // TODO.md.
-    fn position(&self) -> std::time::Duration {
-        if self.paused { self.played } else { self.played + self.started.elapsed() }
-    }
-
-    // How long until the displayed position (whole seconds) next changes.
-    fn until_next_second(&self) -> Option<std::time::Duration> {
-        if self.paused {
-            return None;
-        }
-        let pos = self.position();
-        Some(std::time::Duration::from_secs(pos.as_secs() + 1) - pos)
-    }
-
     fn marker(&self) -> Marker {
         if self.paused { Marker::Paused } else { Marker::Playing }
-    }
-}
-
-// Spawns mpv on the item's stream URL and returns immediately — mpv keeps
-// playing in the background while the event loop (gamepad input included)
-// stays responsive. Failure to spawn is logged, not fatal: a bad track
-// shouldn't take down the browser. Driving one long-lived mpv over its
-// JSON IPC instead is still PLAN.md's playback-control step (see TODO.md);
-// this just stops playback from freezing the UI.
-fn play(browser: &Browser, item: &Item) -> Option<std::process::Child> {
-    let url = browser.stream_url(&item.id);
-    log::info!("playing {} ({}) at {}kbps", item.name, item.id, api::AUDIO_BITRATE / 1000);
-    match std::process::Command::new("mpv").arg("--no-video").arg(&url).spawn() {
-        Ok(child) => Some(child),
-        Err(e) => {
-            log::warn!("failed to run mpv: {e}");
-            None
-        }
-    }
-}
-
-// Stops whatever's currently playing, if anything, so starting a new track
-// doesn't leave the old one's audio running underneath it.
-fn stop_playback(mpv: &mut Option<std::process::Child>) {
-    if let Some(mut child) = mpv.take() {
-        child.kill().ok();
-        child.wait().ok();
     }
 }
 
@@ -515,7 +476,9 @@ struct App {
     username: String,
     password: String,
     state: Option<State>,
-    mpv: Option<std::process::Child>,
+    // Started on demand (see App::mpv), so a crashed mpv just costs the
+    // next play a restart.
+    mpv: Option<Mpv>,
     playing: Option<Playing>,
     pad: Arc<EvdevHandle<File>>,
     proxy: winit::event_loop::EventLoopProxy<AppEvent>,
@@ -579,32 +542,39 @@ fn start_editing(pad: &Arc<EvdevHandle<File>>, proxy: &winit::event_loop::EventL
 }
 
 impl App {
-    // Forgets a track whose mpv has already exited (played to the end, or
-    // died), so the list stops showing it as playing.
-    fn reap_mpv(&mut self) {
-        if let Some(child) = self.mpv.as_mut()
-            && matches!(child.try_wait(), Ok(Some(_)) | Err(_))
-        {
-            self.mpv = None;
-            self.playing = None;
+    // The player, started if it isn't running. Failure is logged, not
+    // fatal: no mpv shouldn't take down the browser.
+    fn mpv(&mut self) -> Option<&mut Mpv> {
+        if self.mpv.is_none() {
+            let proxy = self.proxy.clone();
+            match Mpv::spawn(move |ev| {
+                proxy.send_event(AppEvent::Mpv(ev)).ok();
+            }) {
+                Ok(mpv) => self.mpv = Some(mpv),
+                Err(e) => log::warn!("{e}"),
+            }
         }
+        self.mpv.as_mut()
     }
 
+    // Plays tracks[index] and everything after it, in order.
     fn start_track(&mut self, tracks: Vec<Item>, index: usize) {
         let Some(State::Browsing(browser)) = self.state.as_ref() else { return };
-        stop_playback(&mut self.mpv);
-        self.mpv = play(browser, &tracks[index]);
-        self.playing = self.mpv.as_ref().map(|_| Playing {
+        let urls: Vec<String> = tracks[index..].iter().map(|item| browser.stream_url(&item.id)).collect();
+        let Some(mpv) = self.mpv() else { return };
+        let item = &tracks[index];
+        log::info!("playing {} ({}) at {}kbps", item.name, item.id, api::AUDIO_BITRATE / 1000);
+        mpv.play(&urls);
+        self.playing = Some(Playing {
             tracks,
+            first: index,
             index,
-            started: std::time::Instant::now(),
-            played: std::time::Duration::ZERO,
+            position: std::time::Duration::ZERO,
             paused: false,
         });
     }
 
     fn skip(&mut self, delta: i32) {
-        self.reap_mpv();
         let Some(p) = self.playing.as_ref() else { return };
         let next = p.index as i32 + delta;
         if next < 0 || next >= p.tracks.len() as i32 {
@@ -614,30 +584,59 @@ impl App {
         self.start_track(tracks, next as usize);
     }
 
-    // Stopgap until mpv is driven over its JSON IPC (see TODO.md): freezing
-    // the process stops audio within a buffer's worth of time, and thawing
-    // it resumes where it left off.
+    // The paused flag follows once mpv confirms (see Event::Paused).
     fn toggle_pause(&mut self) {
-        self.reap_mpv();
-        let (Some(child), Some(p)) = (self.mpv.as_ref(), self.playing.as_mut()) else { return };
-        let signal = if p.paused { libc::SIGCONT } else { libc::SIGSTOP };
-        if unsafe { libc::kill(child.id() as libc::pid_t, signal) } != 0 {
-            log::warn!("pause/resume: {}", std::io::Error::last_os_error());
-            return;
+        if self.playing.is_some()
+            && let Some(mpv) = self.mpv.as_mut()
+        {
+            mpv.toggle_pause();
         }
-        if p.paused {
-            p.started = std::time::Instant::now();
-            p.paused = false;
-            log::info!("resumed {}", p.item().name);
-        } else {
-            p.played += p.started.elapsed();
-            p.paused = true;
-            log::info!("paused {}", p.item().name);
+    }
+
+    fn on_mpv(&mut self, ev: crate::mpv::Event) {
+        use crate::mpv::Event;
+        match ev {
+            Event::Exited => {
+                if self.mpv.take().is_some() {
+                    log::warn!("mpv exited");
+                }
+                self.playing = None;
+            }
+            Event::Idle => {
+                if let Some(p) = self.playing.take() {
+                    log::info!("finished {}", p.item().name);
+                }
+            }
+            Event::Track(pos) => {
+                if let Some(p) = self.playing.as_mut()
+                    && let Some(index) = p.first.checked_add(pos).filter(|&i| i < p.tracks.len())
+                {
+                    // Only worth a line when mpv moved on by itself; a
+                    // selection or skip was logged when it was sent.
+                    if index != p.index {
+                        log::info!("playing {}", p.tracks[index].name);
+                    }
+                    p.index = index;
+                    p.position = std::time::Duration::ZERO;
+                }
+            }
+            Event::Position(secs) => {
+                if let Some(p) = self.playing.as_mut() {
+                    p.position = std::time::Duration::from_secs(secs);
+                }
+            }
+            Event::Paused(paused) => {
+                if let Some(p) = self.playing.as_mut()
+                    && p.paused != paused
+                {
+                    p.paused = paused;
+                    log::info!("{} {}", if paused { "paused" } else { "resumed" }, p.item().name);
+                }
+            }
         }
     }
 
     fn redraw(&mut self) {
-        self.reap_mpv();
         let egui_glow = self.egui_glow.as_mut().unwrap();
         let window = self.gl_window.as_ref().unwrap().window();
         let log_lines = crate::util::recent_lines();
@@ -695,7 +694,7 @@ impl App {
                         let right = if at_tracks {
                             let dur = item.duration_secs().map(fmt_duration).unwrap_or_default();
                             match playing {
-                                Some(p) => format!("{} / {dur}", fmt_duration(p.position().as_secs())),
+                                Some(p) => format!("{} / {dur}", fmt_duration(p.position.as_secs())),
                                 None => dur,
                             }
                         } else {
@@ -708,19 +707,8 @@ impl App {
                     })
                     .collect();
                 let selected = frame.selected;
-                // The position counter, if one is on screen, needs a frame
-                // of its own each second; nothing else here changes without
-                // input.
-                let tick = self
-                    .playing
-                    .as_ref()
-                    .filter(|p| at_tracks && frame.items.iter().any(|item| item.id == p.item().id))
-                    .and_then(Playing::until_next_second);
 
                 egui_glow.run(window, |ui| {
-                    if let Some(delay) = tick {
-                        ui.ctx().request_repaint_after(delay);
-                    }
                     draw_title(ui, &title);
                     draw_log_panel(ui, &log_lines);
                     draw_legend(ui, if at_tracks { LEGEND_TRACKS } else { LEGEND_ALBUMS });
@@ -883,6 +871,9 @@ impl winit::application::ApplicationHandler<AppEvent> for App {
         // — connect after, not before, so a flaky link shows an on-screen
         // message instead of the process dying with nothing to see.
         self.state = Some(connect(&self.server, &self.username, &self.password));
+        // Up front rather than on the first Select, so that doesn't stall
+        // waiting for mpv to start.
+        self.mpv();
 
         self.gl_window.as_ref().unwrap().window().request_redraw();
     }
@@ -940,6 +931,15 @@ impl winit::application::ApplicationHandler<AppEvent> for App {
                 }
                 return;
             }
+            AppEvent::Mpv(ev) => {
+                self.on_mpv(ev);
+                // Once a second while playing, for the position counter;
+                // not while held, same as for Nav below.
+                if !self.held && let Some(gl_window) = &self.gl_window {
+                    gl_window.window().request_redraw();
+                }
+                return;
+            }
             // Nothing to show while held (see the Nav case below); any
             // pending timer is simply left to lapse.
             AppEvent::Repaint(_) if self.held => return,
@@ -972,7 +972,7 @@ impl winit::application::ApplicationHandler<AppEvent> for App {
     fn exiting(&mut self, _event_loop: &winit::event_loop::ActiveEventLoop) {
         // Never leave the screen dark behind us, whatever the exit path.
         self.set_hold(false);
-        stop_playback(&mut self.mpv);
+        self.mpv = None;
         if let Some(egui_glow) = self.egui_glow.as_mut() {
             egui_glow.destroy();
         }

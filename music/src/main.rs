@@ -6,6 +6,7 @@
 
 mod api;
 mod browse;
+mod mpv;
 mod pad;
 mod ui;
 mod util;
