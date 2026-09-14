@@ -35,12 +35,13 @@ fn server_field_id() -> egui::Id {
 
 // The event loop's user event: decoded gamepad nav events, plus the other
 // async signals the UI reacts to — lowkey (the delegated on-screen keyboard)
-// exiting once the user is done editing, and egui asking for a repaint
-// (see App::resumed).
+// exiting once the user is done editing, egui asking for a repaint (see
+// App::resumed), and SIGTERM/SIGINT (see watch_signals).
 enum AppEvent {
     Nav(NavEvent),
     LowkeyExited,
     Repaint(std::time::Duration),
+    Terminate,
 }
 
 struct GlutinWindowContext {
@@ -905,6 +906,12 @@ impl winit::application::ApplicationHandler<AppEvent> for App {
 
     fn user_event(&mut self, event_loop: &winit::event_loop::ActiveEventLoop, ev: AppEvent) {
         let ev = match ev {
+            // Same path as Select: exiting() stops mpv and undoes hold mode.
+            AppEvent::Terminate => {
+                log::info!("terminated, quitting");
+                event_loop.exit();
+                return;
+            }
             AppEvent::LowkeyExited => {
                 self.editing = false;
                 if let Err(e) = self.pad.grab(true) {
@@ -959,6 +966,47 @@ impl winit::application::ApplicationHandler<AppEvent> for App {
     }
 }
 
+// ---- Signals -----------------------------------------------------------------
+
+// Write end of the self-pipe the signal handler pokes; -1 until set up.
+static SIGNAL_PIPE: std::sync::atomic::AtomicI32 = std::sync::atomic::AtomicI32::new(-1);
+
+extern "C" fn on_signal(_: libc::c_int) {
+    // write(2) is async-signal-safe; nothing else here is allowed to be.
+    let fd = SIGNAL_PIPE.load(std::sync::atomic::Ordering::Relaxed);
+    unsafe { libc::write(fd, [0u8].as_ptr().cast(), 1) };
+}
+
+// Turns SIGTERM/SIGINT into AppEvent::Terminate so the event loop exits
+// through the same exiting() as a Select press, stopping mpv and restoring
+// the backlight — the default action would leave mpv playing on its own.
+// The handler can only safely write to a pipe; a thread on the other end
+// does the actual send. Handlers (unlike a blocked signal mask) aren't
+// inherited across exec, so mpv and lowkey see plain defaults.
+fn watch_signals(proxy: winit::event_loop::EventLoopProxy<AppEvent>) {
+    use std::io::Read;
+    use std::os::fd::FromRawFd;
+
+    let mut fds = [0 as libc::c_int; 2];
+    if unsafe { libc::pipe2(fds.as_mut_ptr(), libc::O_CLOEXEC) } != 0 {
+        log::warn!("signal pipe: {}", std::io::Error::last_os_error());
+        return;
+    }
+    SIGNAL_PIPE.store(fds[1], std::sync::atomic::Ordering::Relaxed);
+    let mut read_end = unsafe { File::from_raw_fd(fds[0]) };
+    for sig in [libc::SIGTERM, libc::SIGINT] {
+        unsafe { libc::signal(sig, on_signal as extern "C" fn(libc::c_int) as libc::sighandler_t) };
+    }
+    std::thread::spawn(move || {
+        let mut byte = [0u8];
+        while read_end.read_exact(&mut byte).is_ok() {
+            if proxy.send_event(AppEvent::Terminate).is_err() {
+                return; // event loop shut down
+            }
+        }
+    });
+}
+
 pub fn run(server: String, username: String, password: String) {
     let pad = pad::open_pad(None).unwrap_or_else(|| die("no gamepad found"));
     // Exclusive access: EmulationStation is still running underneath (this
@@ -974,6 +1022,7 @@ pub fn run(server: String, username: String, password: String) {
         .build()
         .unwrap_or_else(|e| die(&format!("cannot create event loop: {e}")));
     let proxy = event_loop.create_proxy();
+    watch_signals(proxy.clone());
 
     let reader_pad = Arc::clone(&pad);
     let reader_proxy = proxy.clone();
