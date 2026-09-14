@@ -295,7 +295,7 @@ fn draw_log_panel(ui: &mut egui::Ui, lines: &[(log::Level, String)]) {
                 log::Level::Warn => LOG_WARN,
                 _ => DIM,
             };
-            ui.add(egui::Label::new(egui::RichText::new(line).color(color)).truncate());
+            ui.add(egui::Label::new(egui::RichText::new(line).color(color)).wrap());
         }
     });
 }
