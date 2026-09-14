@@ -5,7 +5,7 @@ A gamepad-driven Jellyfin audio player for the RG35xx Plus.
 ## Where this is (v0)
 
 A fullscreen gamepad UI (albums → tracks) authenticates, browses, and plays
-the selection with `mpv` on its direct-play stream URL. No artist level:
+the selection with `mpv` on its transcoded (AAC) stream URL. No artist level:
 Jellyfin's artist tagging on this library is too messy to browse by
 ("feat. X" splitting one act into several MusicArtist entries, "VA"
 compilations, most artists tag-only with no folder of their own) — see
@@ -16,11 +16,12 @@ the exact status. Everything below is next.
 ## Audio format
 
 Jellyfin transcodes on the fly — the stream URL just needs `static=true`
-dropped and `audioCodec`/`maxAudioBitrate` added, and the server re-encodes
+dropped and `audioCodec`/`audioBitRate` added, and the server re-encodes
 FLAC (or anything else) to the requested codec per request, no pre-conversion
-needed on our side.
+needed on our side. Done: see api.rs's stream_url. Confirmed against the
+real server: the response is `audio/aac`, a raw ADTS stream, chunked.
 
-AAC is an ordinary file (`.m4a`), not a streaming-only format — the same
+AAC is an ordinary file (`.aac`), not a streaming-only format — the same
 bytes a transcoded stream sends can be written to disk instead of piped to
 `mpv`, and played back later with no network at all. So "transcode for
 playback" and "cache for offline" are the same download, just with a
@@ -135,11 +136,11 @@ the way iOS/Android do:
    authenticated call (Quick Connect again, or `AuthenticateByName` if
    `-u`/`-p` were given) and replace the stored token, which recovers
    regardless of *why* the old one died.
-3. **Transcoded streaming + local cache, together** — drop `static=true`,
-   request AAC at a modest bitrate, and as those bytes come back, tee them
-   both to `mpv`'s stdin (for on-the-fly playback) and to a cache file
-   (`item-id.aac`). One download serves both purposes from the start,
-   instead of streaming now and bolting caching on later.
+3. **Transcoded streaming + local cache** — the streaming half is done:
+   `stream_url` asks for AAC at 192kbps and `mpv` plays that straight off
+   the network. Still to do: as those bytes come back, tee them both to
+   `mpv`'s stdin and to a cache file (`item-id.aac`), so the one download
+   serves both purposes.
    - Cache hit: if the file already exists, trust it and play straight from
      disk — no re-download, no validation. Good enough until corruption or
      partial files actually show up as a problem.

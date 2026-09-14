@@ -17,6 +17,9 @@ const DEVICE_ID: &str = "rg35xx-music";
 // authenticate's AgentBuilder).
 const REQUEST_TIMEOUT: Duration = Duration::from_secs(10);
 
+// Transcode target, in bits per second (see stream_url).
+const AUDIO_BITRATE: u32 = 192_000;
+
 pub struct Client {
     agent: ureq::Agent,
     server: String,
@@ -127,9 +130,17 @@ impl Client {
         self.get_items(&[("ParentId", album_id), ("IncludeItemTypes", "Audio"), ("SortBy", "IndexNumber")])
     }
 
-    // Direct-play URL for an item; the server transcodes only if the
-    // original format needs it (static=true asks it not to bother otherwise).
+    // Stream URL for an item, transcoded on the fly to AAC at a modest
+    // bitrate: without static=true the server re-encodes whatever the
+    // original is (FLAC, mostly) per request, so the handheld's WiFi carries
+    // ~200kbps instead of the lossless file. Plenty for its speaker or a
+    // 3.5mm jack. deviceId lets the server tie the ffmpeg job to us and
+    // kill it when we start the next one, rather than only once the dropped
+    // connection times out.
     pub fn stream_url(&self, item_id: &str) -> String {
-        format!("{}/Audio/{}/stream?static=true&api_key={}", self.server, item_id, self.token)
+        format!(
+            "{}/Audio/{}/stream?audioCodec=aac&audioBitRate={AUDIO_BITRATE}&deviceId={DEVICE_ID}&api_key={}",
+            self.server, item_id, self.token
+        )
     }
 }
