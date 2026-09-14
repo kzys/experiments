@@ -10,7 +10,7 @@ pub fn die(msg: &str) -> ! {
 
 // How many recent lines the on-screen log panel shows (see ui.rs); older
 // ones still make it to stderr and the log file, just not the screen.
-const VISIBLE_LINES: usize = 2;
+const VISIBLE_LINES: usize = 10;
 
 static RECENT: Mutex<VecDeque<(log::Level, String)>> = Mutex::new(VecDeque::new());
 

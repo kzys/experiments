@@ -215,11 +215,14 @@ const SEL_WEAK: egui::Color32 = egui::Color32::from_rgb(0xcf, 0xe9, 0xf7);
 const FIELD_BG: egui::Color32 = egui::Color32::from_rgb(0x23, 0x23, 0x23);
 const LOG_WARN: egui::Color32 = egui::Color32::from_rgb(0xd0, 0xa0, 0x30);
 const LOG_ERROR: egui::Color32 = egui::Color32::from_rgb(0xe0, 0x5a, 0x5a);
+const LOG_INFO: egui::Color32 = egui::Color32::from_rgb(0x50, 0xc0, 0xc8);
 
 // One size for everything, title included: the mockups had a 30px title,
 // but a single-size monospace grid reads more like the classic players
-// this is after.
+// this is after. The log panel is the one exception, at FS_SM: it's
+// diagnostics, not UI, and shouldn't compete with the list for the screen.
 const FS_MD: f32 = 20.0;
+const FS_SM: f32 = 15.0;
 const SIDE: i8 = 32; // horizontal padding of every panel
 // Space left of the list for the play marker, which sits outside the row.
 const GUTTER: f32 = 23.0;
@@ -243,7 +246,7 @@ fn apply_theme(ctx: &egui::Context) {
             (TextStyle::Heading, FontId::new(FS_MD, Proportional)),
             (TextStyle::Body, FontId::new(FS_MD, Proportional)),
             (TextStyle::Button, FontId::new(FS_MD, Proportional)),
-            (TextStyle::Small, FontId::new(FS_MD, Proportional)),
+            (TextStyle::Small, FontId::new(FS_SM, Proportional)),
             (TextStyle::Monospace, FontId::new(FS_MD, Proportional)),
         ]
         .into();
@@ -284,19 +287,22 @@ fn draw_legend(ui: &mut egui::Ui, legend: &str) {
 
 // A handful of the most recent log lines (see util.rs), always visible: the
 // only way to see what's going wrong on a kiosk device with no console.
+// Added before the legend so it ends up below it, at the screen's edge.
 fn draw_log_panel(ui: &mut egui::Ui, lines: &[(log::Level, String)]) {
     if lines.is_empty() {
         return;
     }
-    egui::Panel::bottom("log").frame(panel_frame(6, 4)).show(ui, |ui| {
+    egui::Panel::bottom("log").frame(panel_frame(6, 8)).show(ui, |ui| {
         ui.spacing_mut().item_spacing.y = 4.0;
         for (level, line) in lines {
             let color = match level {
                 log::Level::Error => LOG_ERROR,
                 log::Level::Warn => LOG_WARN,
-                _ => DIM,
+                log::Level::Info => LOG_INFO,
+                log::Level::Debug => TEXT,
+                log::Level::Trace => DIM,
             };
-            ui.add(egui::Label::new(egui::RichText::new(line).color(color)).wrap());
+            ui.add(egui::Label::new(egui::RichText::new(line).small().color(color)).wrap());
         }
     });
 }
@@ -652,8 +658,8 @@ impl App {
                 let mut server = self.server.clone();
                 egui_glow.run(window, |ui| {
                     draw_title(ui, title);
-                    draw_legend(ui, legend);
                     draw_log_panel(ui, &log_lines);
+                    draw_legend(ui, legend);
                     egui::CentralPanel::default().frame(panel_frame(20, 0)).show(ui, |ui| {
                         ui.label(&message);
                         ui.add_space(18.0);
@@ -707,8 +713,8 @@ impl App {
                         ui.ctx().request_repaint_after(delay);
                     }
                     draw_title(ui, &title);
-                    draw_legend(ui, if at_tracks { LEGEND_TRACKS } else { LEGEND_ALBUMS });
                     draw_log_panel(ui, &log_lines);
+                    draw_legend(ui, if at_tracks { LEGEND_TRACKS } else { LEGEND_ALBUMS });
                     // The list's left margin leaves GUTTER of room for the
                     // play marker, which draw_row paints outside the row box.
                     let list_frame = egui::Frame::new().fill(BG).inner_margin(egui::Margin {
