@@ -29,10 +29,9 @@ different destination. That argues for building the transcoded stream first
 and getting a local cache almost for free, rather than a separate
 FLAC-to-lossy conversion pipeline living outside Jellyfin.
 
-Default: 192kbps AAC-LC for every transcode, untested on the device but
-comfortably past "transparent" for a handheld's built-in speaker or a 3.5mm
-jack. Treated as the shipped default, not a blocker — revisit only if it
-audibly sounds bad on the actual hardware.
+Default: 128kbps AAC-LC for every transcode — tried on the device after
+192kbps and sounds fine through its built-in speaker and a 3.5mm jack.
+Revisit only if it audibly sounds bad.
 
 ## Login
 
@@ -137,7 +136,7 @@ the way iOS/Android do:
    `-u`/`-p` were given) and replace the stored token, which recovers
    regardless of *why* the old one died.
 3. **Transcoded streaming + local cache** — the streaming half is done:
-   `stream_url` asks for AAC at 192kbps and `mpv` plays that straight off
+   `stream_url` asks for AAC at 128kbps and `mpv` plays that straight off
    the network. Still to do: as those bytes come back, tee them both to
    `mpv`'s stdin and to a cache file (`item-id.aac`), so the one download
    serves both purposes.

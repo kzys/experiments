@@ -21,7 +21,7 @@ Working:
   EmulationStation's bundled Droid Sans Fallback for CJK glyphs neither it
   nor egui's own (unbundled, to save binary size) fonts cover.
 - Playing a track shells out to `mpv --no-video` on its stream URL, which
-  asks Jellyfin to transcode to 192kbps AAC on the fly so the original
+  asks Jellyfin to transcode to 128kbps AAC on the fly so the original
   (FLAC, mostly) never crosses the WiFi. Nothing is cached yet (see PLAN.md).
   Selecting a new track kills whatever's currently playing and spawns
   the next one, and skip does the same with the adjacent track; pause is

@@ -425,7 +425,7 @@ impl Playing {
 // this just stops playback from freezing the UI.
 fn play(browser: &Browser, item: &Item) -> Option<std::process::Child> {
     let url = browser.stream_url(&item.id);
-    log::info!("playing {} ({})", item.name, item.id);
+    log::info!("playing {} ({}) at {}kbps", item.name, item.id, api::AUDIO_BITRATE / 1000);
     match std::process::Command::new("mpv").arg("--no-video").arg(&url).spawn() {
         Ok(child) => Some(child),
         Err(e) => {

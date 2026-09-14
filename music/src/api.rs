@@ -18,7 +18,7 @@ const DEVICE_ID: &str = "rg35xx-music";
 const REQUEST_TIMEOUT: Duration = Duration::from_secs(10);
 
 // Transcode target, in bits per second (see stream_url).
-const AUDIO_BITRATE: u32 = 192_000;
+pub const AUDIO_BITRATE: u32 = 128_000;
 
 pub struct Client {
     agent: ureq::Agent,
