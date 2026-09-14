@@ -170,5 +170,4 @@ the way iOS/Android do:
 
 ## Open questions
 
-None right now — see the resolutions folded into the roadmap above. New
-ones will show up once step 1 is actually implemented.
+None right now — see the resolutions folded into the roadmap above.
