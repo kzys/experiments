@@ -224,8 +224,6 @@ const LOG_INFO: egui::Color32 = egui::Color32::from_rgb(0x50, 0xc0, 0xc8);
 const FS_MD: f32 = 20.0;
 const FS_SM: f32 = 15.0;
 const SIDE: i8 = 32; // horizontal padding of every panel
-// Space left of the list for the play marker, which sits outside the row.
-const GUTTER: f32 = 23.0;
 
 const LEGEND_ALBUMS: &str = "A: select   B: back   Select: quit   Select+Start: hold";
 const LEGEND_TRACKS: &str = "A: select   B: back   X: play/pause   L1/R1: skip   Select: quit";
@@ -330,13 +328,17 @@ enum Marker {
     Paused,
 }
 
-// Text, not a drawn glyph: the same "> " a terminal player would print.
-fn draw_marker(painter: &egui::Painter, center: egui::Pos2, marker: Marker) {
-    let text = match marker {
-        Marker::Playing => ">",
-        Marker::Paused => "||",
-    };
-    painter.text(center, egui::Align2::CENTER_CENTER, text, body_font(), SEL_BORDER);
+impl Marker {
+    // Text, not a drawn glyph: the same "> " a terminal player would print.
+    // Every variant is the same width so the names line up across rows —
+    // the font is monospace, so a blank one is just spaces.
+    fn text(marker: Option<Marker>) -> &'static str {
+        match marker {
+            Some(Marker::Playing) => ">  ",
+            Some(Marker::Paused) => "|| ",
+            None => "   ",
+        }
+    }
 }
 
 // Every list row is this tall: one line of body text plus padding.
@@ -345,39 +347,37 @@ fn row_height(ui: &egui::Ui) -> f32 {
     ui.fonts_mut(|f| f.row_height(&body_font())) + 2.0 * pad_y
 }
 
-// One list row: `left` text, `right` (count or duration) flush to the right
-// edge in the weak color, and the selection box when selected. The row spans
-// the full list width; the marker gutter to its left is outside the box.
-fn draw_row(ui: &mut egui::Ui, selected: bool, left: &str, right: &str, marker: Option<Marker>) {
+// One list row: the `marker` cell (see Marker::text; empty on screens
+// without one) and `left` text as one line, `right` (count or duration)
+// flush to the right edge in the weak color, and the selection box around
+// all of it when selected. The row spans the full list width.
+fn draw_row(ui: &mut egui::Ui, selected: bool, marker: &str, left: &str, right: &str) {
+    let pad_x = 12.0;
     let font = body_font();
     let (rect, _) = ui.allocate_exact_size(egui::vec2(ui.available_width(), row_height(ui)), egui::Sense::hover());
     let painter = ui.painter();
-    let box_rect = egui::Rect::from_min_max(egui::pos2(rect.left() + GUTTER, rect.top()), rect.max);
 
     if selected {
-        painter.rect(box_rect, 3.0, SEL_BG, egui::Stroke::new(1.0, SEL_BORDER), egui::StrokeKind::Inside);
-    }
-    if let Some(marker) = marker {
-        draw_marker(painter, egui::pos2(rect.left() + GUTTER / 2.0, rect.center().y), marker);
+        painter.rect(rect, 3.0, SEL_BG, egui::Stroke::new(1.0, SEL_BORDER), egui::StrokeKind::Inside);
     }
 
     let right_color = if selected { SEL_WEAK } else { WEAK };
     let right_galley = painter.layout_no_wrap(right.to_owned(), font.clone(), right_color);
-    let right_x = box_rect.right() - 12.0 - right_galley.size().x;
+    let right_x = rect.right() - pad_x - right_galley.size().x;
     painter.galley(
         egui::pos2(right_x, rect.center().y - right_galley.size().y / 2.0),
         right_galley,
         right_color,
     );
 
-    let mut job = egui::text::LayoutJob::simple_singleline(left.to_owned(), font, TEXT);
-    job.wrap = egui::text::TextWrapping::truncate_at_width(right_x - 16.0 - box_rect.left());
+    let left_x = rect.left() + pad_x;
+    let mut job = egui::text::LayoutJob::default();
+    job.wrap = egui::text::TextWrapping::truncate_at_width(right_x - 16.0 - left_x);
+    let format = |color| egui::text::TextFormat { font_id: font.clone(), color, ..Default::default() };
+    job.append(marker, 0.0, format(SEL_BORDER));
+    job.append(left, 0.0, format(TEXT));
     let left_galley = painter.layout_job(job);
-    painter.galley(
-        egui::pos2(box_rect.left(), rect.center().y - left_galley.size().y / 2.0),
-        left_galley,
-        TEXT,
-    );
+    painter.galley(egui::pos2(left_x, rect.center().y - left_galley.size().y / 2.0), left_galley, TEXT);
 }
 
 fn fmt_duration(secs: u64) -> String {
@@ -682,7 +682,7 @@ impl App {
                     .filter_map(|item| item.index_number)
                     .max()
                     .map_or(1, |n| n.to_string().len());
-                let rows: Vec<(String, String, Option<Marker>)> = frame
+                let rows: Vec<(&str, String, String)> = frame
                     .items
                     .iter()
                     .map(|item| {
@@ -701,7 +701,10 @@ impl App {
                         } else {
                             item.child_count.map(|n| format!("{n} tracks")).unwrap_or_default()
                         };
-                        (name, right, playing.map(Playing::marker))
+                        // Only tracks can be playing, so only the track
+                        // list has the marker column.
+                        let marker = if at_tracks { Marker::text(playing.map(Playing::marker)) } else { "" };
+                        (marker, name, right)
                     })
                     .collect();
                 let selected = frame.selected;
@@ -721,10 +724,8 @@ impl App {
                     draw_title(ui, &title);
                     draw_log_panel(ui, &log_lines);
                     draw_legend(ui, if at_tracks { LEGEND_TRACKS } else { LEGEND_ALBUMS });
-                    // The list's left margin leaves GUTTER of room for the
-                    // play marker, which draw_row paints outside the row box.
                     let list_frame = egui::Frame::new().fill(BG).inner_margin(egui::Margin {
-                        left: SIDE - GUTTER as i8,
+                        left: SIDE,
                         right: SIDE,
                         top: 10,
                         bottom: 10,
@@ -754,8 +755,8 @@ impl App {
                                 if rows.is_empty() {
                                     ui.weak("(empty)");
                                 }
-                                for (idx, (name, right, marker)) in rows.iter().enumerate() {
-                                    draw_row(ui, idx == selected, name, right, *marker);
+                                for (idx, (marker, name, right)) in rows.iter().enumerate() {
+                                    draw_row(ui, idx == selected, marker, name, right);
                                 }
                             });
                     });
