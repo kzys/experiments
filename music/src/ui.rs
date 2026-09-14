@@ -332,20 +332,18 @@ fn draw_marker(painter: &egui::Painter, center: egui::Pos2, marker: Marker) {
     painter.text(center, egui::Align2::CENTER_CENTER, text, body_font(), SEL_BORDER);
 }
 
+// Every list row is this tall: one line of body text plus padding.
+fn row_height(ui: &egui::Ui) -> f32 {
+    let pad_y = 6.0;
+    ui.fonts_mut(|f| f.row_height(&body_font())) + 2.0 * pad_y
+}
+
 // One list row: `left` text, `right` (count or duration) flush to the right
 // edge in the weak color, and the selection box when selected. The row spans
 // the full list width; the marker gutter to its left is outside the box.
-fn draw_row(
-    ui: &mut egui::Ui,
-    selected: bool,
-    left: &str,
-    right: &str,
-    marker: Option<Marker>,
-) -> egui::Response {
+fn draw_row(ui: &mut egui::Ui, selected: bool, left: &str, right: &str, marker: Option<Marker>) {
     let font = body_font();
-    let pad_y = 6.0;
-    let row_h = ui.painter().fonts_mut(|f| f.row_height(&font)) + 2.0 * pad_y;
-    let (rect, resp) = ui.allocate_exact_size(egui::vec2(ui.available_width(), row_h), egui::Sense::hover());
+    let (rect, _) = ui.allocate_exact_size(egui::vec2(ui.available_width(), row_height(ui)), egui::Sense::hover());
     let painter = ui.painter();
     let box_rect = egui::Rect::from_min_max(egui::pos2(rect.left() + GUTTER, rect.top()), rect.max);
 
@@ -373,7 +371,6 @@ fn draw_row(
         left_galley,
         TEXT,
     );
-    resp
 }
 
 fn fmt_duration(secs: u64) -> String {
@@ -721,14 +718,23 @@ impl App {
                     });
                     egui::CentralPanel::default().frame(list_frame).show(ui, |ui| {
                         ui.spacing_mut().item_spacing.y = 2.0;
-                        // Salted by title (unique per level: "Albums", or
-                        // each album's own name), so each list keeps its
-                        // own scroll offset — otherwise Albums and Tracks
-                        // share one ScrollArea's persisted offset, and
-                        // going Back visibly re-scrolls to catch up with
-                        // wherever the revealed list's selection actually is.
+                        // The list isn't scrolled, it's selected: the offset
+                        // is whatever centers the selected row, set up front
+                        // so this pass lays the rows out in their final
+                        // place. (scroll_to_me would only take effect on the
+                        // next pass, showing one frame with the selection
+                        // box moved but the list not yet caught up.) Clamped
+                        // to the list here, since egui only does that after
+                        // laying the content out.
+                        let row_h = row_height(ui);
+                        let spacing = ui.spacing().item_spacing.y;
+                        let pitch = row_h + spacing;
+                        let view_h = ui.available_height();
+                        let content_h = rows.len() as f32 * pitch - spacing;
+                        let offset = (selected as f32 * pitch - (view_h - row_h) / 2.0)
+                            .clamp(0.0, (content_h - view_h).max(0.0));
                         egui::ScrollArea::vertical()
-                            .id_salt(&title)
+                            .vertical_scroll_offset(offset)
                             .auto_shrink([false, false])
                             .scroll_bar_visibility(egui::scroll_area::ScrollBarVisibility::AlwaysHidden)
                             .show(ui, |ui| {
@@ -736,16 +742,7 @@ impl App {
                                     ui.weak("(empty)");
                                 }
                                 for (idx, (name, right, marker)) in rows.iter().enumerate() {
-                                    let resp = draw_row(ui, idx == selected, name, right, *marker);
-                                    if idx == selected {
-                                        // Snap rather than animate: under
-                                        // d-pad auto-repeat an animated
-                                        // scroll never gets to settle.
-                                        resp.scroll_to_me_animation(
-                                            Some(egui::Align::Center),
-                                            egui::style::ScrollAnimation::none(),
-                                        );
-                                    }
+                                    draw_row(ui, idx == selected, name, right, *marker);
                                 }
                             });
                     });
