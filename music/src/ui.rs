@@ -672,18 +672,24 @@ impl App {
                 let frame = browser.current();
                 let title = frame.title.clone();
                 let at_tracks = frame.at_tracks();
+                // Track numbers right-aligned in a column just wide enough
+                // for the album's largest, and an untagged track blanked to
+                // the same width, keeping the names in a column of their
+                // own — exact, since the font is monospace.
+                let digits = frame
+                    .items
+                    .iter()
+                    .filter_map(|item| item.index_number)
+                    .max()
+                    .map_or(1, |n| n.to_string().len());
                 let rows: Vec<(String, String, Option<Marker>)> = frame
                     .items
                     .iter()
                     .map(|item| {
                         let playing = self.playing.as_ref().filter(|p| p.item().id == item.id);
-                        // Number right-aligned in a 4-wide column (so up to
-                        // 9999) and an untagged track blanked to the same
-                        // width, keeping the names in a column of their
-                        // own — exact, since the font is monospace.
                         let name = match item.index_number {
-                            Some(n) if at_tracks => format!("{n:>4}. {}", item.name),
-                            None if at_tracks => format!("      {}", item.name),
+                            Some(n) if at_tracks => format!("{n:>digits$}. {}", item.name),
+                            None if at_tracks => format!("{:digits$}  {}", "", item.name),
                             _ => item.name.clone(),
                         };
                         let right = if at_tracks {
