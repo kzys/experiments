@@ -13,7 +13,7 @@ the laptop over USB serial.
 herdr  <--Unix socket-->  bridge (laptop)  <--USB serial-->  firmware (board)
 ```
 
-All Rust.
+All Rust, apart from the Python scripts that draw the art.
 
 - `protocol/`: the messages, `no_std`, shared by both sides, and how agents
   are split into storeys. One JSON value per line; externally tagged enums so
@@ -141,17 +141,15 @@ Firmware (needs espup's Xtensa toolchain, and `pypng` and `lz4` on `PATH`'s
 Python: the build converts the animation frames with LVGL's image tool):
 
     cd firmware
-    ESP_EXPORT=~/export-esp.sh . ./env.sh
+    . ./env.sh    # sources espup's export-esp.sh; set ESP_EXPORT if it isn't in $HOME
     cargo +esp build --release
     espflash flash --chip esp32s3 --flash-size 16mb target/xtensa-esp32s3-none-elf/release/herdr-panel-firmware
 
-Tests: `cargo test` at the root.
+Tests: `cargo test` in this directory.
 
 ## Notes
 
 - Flashing with espflash's own bootloader runs the flash in DIO mode at 40 MHz;
-  rendering is much faster behind the ESP-IDF bootloader (QIO, 80 MHz). See
-  `~/ws/esp32-s3-hello` (`bench-rust.sh`). That might make sliding scrolls
-  usable; not tried.
+  rendering is much faster behind the ESP-IDF bootloader (QIO, 80 MHz). That
+  might make sliding scrolls usable; not tried.
 - Tapping a mascot moves your real herdr focus.
-- The panel and touch drivers are copied from `~/ws/esp32-s3-hello/rust`.
