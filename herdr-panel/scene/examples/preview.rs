@@ -8,7 +8,7 @@ use std::{env, fs::File, io::BufWriter};
 
 use herdr_panel_protocol::Status;
 use herdr_panel_scene::{
-    CAR_AT, DESKS_PER_STOREY, GROUND_Y, PLUMBOB_ABOVE, SCALE, backdrop, behind_desk, car, digits, lobby,
+    CAR_AT, DECOR_AT, DECORS, DESKS_PER_STOREY, GROUND_Y, PLUMBOB_ABOVE, SCALE, backdrop, behind_desk, car, decor, digits, lobby,
     animation, number_at, plumbob, roof, roof_top, slot, storey, storey_top, street,
 };
 
@@ -40,6 +40,7 @@ fn main() {
         let top = at(storey_top(level));
         let lit = agents.iter().any(|s| *s != Status::Idle);
         img.draw(&storey(*ws, lit), 0, top);
+        img.draw(&decor(level % DECORS, lit), DECOR_AT.0, top + DECOR_AT.1);
         let label = level.to_string();
         let (nx, ny) = number_at(label.len());
         for (i, d) in label.bytes().enumerate() {

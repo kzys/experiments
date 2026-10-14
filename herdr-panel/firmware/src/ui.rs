@@ -27,17 +27,16 @@ use oxivgl::{
 
 use crate::{
     frames::{
-        ARROW_X, CAR_AT, DESK_SPACING, DESKS_PER_STOREY, DESKS_X, GROUND_Y, Loop, NUMBER_AT, PLUMBOB_ABOVE, ROOF_H,
-        SLOTS, STOREY_H, arrow_down_image, arrow_up_image, backdrop_image, car_image, digit_image, lobby_image, loops,
-        plumbob, roof, storey_image, street_image,
+        ARROW_SIZE, ARROW_X, CAR_AT, DECOR_AT, DECORS, DESK_SPACING, DESKS_PER_STOREY, DESKS_X, DIGIT_W, GROUND_Y,
+        Loop, NUMBER_AT, PLUMBOB_ABOVE, PLUMBOB_W, ROOF_H, SLOTS, STOREY_H, arrow_down_image, arrow_up_image, awake,
+        backdrop_image, car_image, decor_image, digit_image, lobby_image, loops, plumbob, roof, storey_image,
+        street_image,
     },
     link,
     touch::POINTER,
 };
 
 const SCREEN_H: i32 = 480;
-/// Width of the plumbob, in screen pixels.
-const PLUMBOB_W: i32 = 10;
 /// Sky kept above the roof when scrolled to the top, in screen pixels.
 const TOP_MARGIN: i32 = 48;
 /// How long the elevator takes per storey, in milliseconds.
@@ -47,7 +46,7 @@ const MANUAL_SCROLL_HOLD_SECS: u64 = 10;
 /// Where the scroll buttons are, and how far their touch area reaches past
 /// their edges, in screen pixels.
 const ARROW_UP_Y: i32 = 8;
-const ARROW_DOWN_Y: i32 = SCREEN_H - 36;
+const ARROW_DOWN_Y: i32 = SCREEN_H - ARROW_SIZE - 8;
 const ARROW_REACH: i32 = 10;
 
 /// The top of storey `level` (0 is the lobby) with the view at the bottom.
@@ -87,6 +86,7 @@ pub struct Panel {
     rendered: Rendered,
     loops: Vec<(Status, Loop)>,
     plumbob: Option<Loop>,
+    awake: Option<Loop>,
     roof: Option<Loop>,
     /// How far the content is shifted down so that it starts at 0: what
     /// "the view at the bottom" adds to every y.
@@ -112,6 +112,7 @@ impl Panel {
             rendered: Rendered::default(),
             loops: Vec::new(),
             plumbob: None,
+            awake: None,
             roof: None,
             offset: 0,
             follow: None,
@@ -163,8 +164,9 @@ impl Panel {
         for (k, storey) in storeys.iter().enumerate() {
             let level = k + 1;
             let top = at(storey_top(level));
-            let lit = storey.agents.iter().any(|a| a.status != Status::Idle);
+            let lit = storey.lit();
             r.images.push(self.image(scroller, storey_image(storey.workspace, lit), 0, top)?);
+            r.images.push(self.image(scroller, decor_image(level % DECORS, lit), DECOR_AT.0, top + DECOR_AT.1)?);
             r.storeys.push(storey.agents.iter().map(|a| a.id.clone()).collect());
             if storey.agents.iter().any(|a| a.focused) {
                 focused = level;
@@ -179,7 +181,13 @@ impl Panel {
         for (k, storey) in storeys.iter().enumerate() {
             let top = at(storey_top(k + 1));
             for (agent, slot) in storey.agents.iter().zip(&SLOTS) {
-                if let Some((_, l)) = self.loops.iter().find(|(s, _)| *s == agent.status) {
+                // An idle agent with the focus is awake rather than dozing.
+                let look = if agent.focused && agent.status == Status::Idle {
+                    self.awake.as_ref()
+                } else {
+                    self.loops.iter().find(|(s, _)| *s == agent.status).map(|(_, l)| l)
+                };
+                if let Some(l) = look {
                     r.sprites.push(self.looping(scroller, l, slot.mascot.0, top + slot.mascot.1)?);
                 }
                 if agent.focused
@@ -254,7 +262,7 @@ impl Panel {
         }
         let (x, y) = NUMBER_AT[len - 1];
         for i in 0..len {
-            r.images.push(self.image(scroller, digit_image(digits[len - 1 - i]), x + 8 * i as i32, top + y)?);
+            r.images.push(self.image(scroller, digit_image(digits[len - 1 - i]), x + DIGIT_W * i as i32, top + y)?);
         }
         Ok(())
     }
@@ -314,6 +322,7 @@ impl View for Panel {
         self.indev = Some(PointerIndev::new(&POINTER)?);
         self.loops = loops().into_iter().collect();
         self.plumbob = Some(plumbob());
+        self.awake = Some(awake());
         self.roof = Some(roof());
         container.bg_color(0x000000).bg_opa(255);
         self.backdrop = Some(self.image(container, backdrop_image(), 0, 0)?);

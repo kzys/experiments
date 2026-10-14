@@ -12,7 +12,7 @@ use heapless::{String, Vec};
 use serde::{Deserialize, Serialize};
 
 /// Most agents the panel shows.
-pub const MAX_AGENTS: usize = 100;
+pub const MAX_AGENTS: usize = 250;
 
 /// Longest label and id, in bytes.
 pub const LABEL_LEN: usize = 24;
@@ -143,6 +143,14 @@ pub struct Storey<'a> {
     /// storeys of the same workspace share it.
     pub workspace: usize,
     pub agents: &'a [Agent],
+}
+
+impl Storey<'_> {
+    /// Whether the storey's lights are on: someone there is not idle, or
+    /// has the focus.
+    pub fn lit(&self) -> bool {
+        self.agents.iter().any(|a| a.status != Status::Idle || a.focused)
+    }
 }
 
 /// Splits `agents` into storeys of at most `per_storey` agents (at least 1),
@@ -302,6 +310,18 @@ mod tests {
         let a = agents(&["w1:p1", "w1:p2", "w1:p3", "w2:p1", "w2:p2"]);
         let flat: std::vec::Vec<&str> = storeys(&a, 2).flat_map(|s| s.agents.iter().map(|a| a.id.as_str())).collect();
         assert_eq!(flat, ["w1:p1", "w1:p2", "w1:p3", "w2:p1", "w2:p2"]);
+    }
+
+    #[test]
+    fn a_storey_is_lit_unless_everyone_idles_unfocused() {
+        let mut a = agents(&["w1:p1", "w1:p2"]);
+        let lit = |a: &[Agent]| storeys(a, 6).next().unwrap().lit();
+        assert!(!lit(&a));
+        a[1].focused = true;
+        assert!(lit(&a));
+        a[1].focused = false;
+        a[0].status = Status::Working;
+        assert!(lit(&a));
     }
 
     #[test]

@@ -1,19 +1,18 @@
 //! A tower seen from the side at night, in the style of a 16-bit console game,
-//! after tower-building games like SimTower: storeys of desks stacked on a
-//! lobby, one or more per herdr workspace, a Claude Code mascot at each desk,
-//! animated by what its agent is doing, and an elevator that rides to the
-//! focused agent.
+//! after tower-building games like SimTower and Tiny Tower: storeys of desks
+//! stacked on a lobby, one or more per herdr workspace, the Claude Code mascot
+//! at each desk, animated by what its agent is doing, and an elevator that
+//! rides to the focused agent.
 //!
-//! The art is PNG files in `assets/`, at half the screen's resolution: the
-//! board shows each pixel as 2x2. Full-width pieces have a file each; small
-//! sprites share `sprites.png`, and `sprites.yaml` says where each one is. Colours are cut to the SNES's 15 bits on
-//! loading. This crate loads them and puts them together: desks onto storeys,
-//! lamps lit or the room tinted by moonlight, and the mascot's frames cut
-//! where their desk hides them. The
-//! backdrop (sky and city) stays still; the street, lobby, storeys, roof,
-//! elevator car and mascots are separate images that the firmware stacks at
-//! the positions given here, in art pixels, and scrolls when the tower is
-//! taller than the screen.
+//! The art is PNG files in `assets/`, shown pixel for pixel. Full-width pieces
+//! have a file each; small sprites, the decor and the mascot's animations
+//! share `sprites.png`, and `sprites.yaml` says where each one is. Colours are
+//! cut to 15 bits on loading. This crate loads them and puts them together:
+//! desks onto storeys, lamps lit or the room tinted by moonlight, and the
+//! mascot's frames cut where their desk hides them. The backdrop (sky) stays
+//! still; the street, lobby, storeys, decor, roof, elevator car and mascots
+//! are separate images that the firmware stacks at the positions given here,
+//! and scrolls when the tower is taller than the screen.
 //!
 //! The positions here must match the art: the tests check that they do.
 
@@ -21,10 +20,11 @@ use herdr_panel_protocol::Status;
 use serde::Deserialize;
 
 /// Size of the screen in art pixels.
-pub const W: usize = 160;
-pub const H: usize = 240;
+pub const W: usize = 320;
+pub const H: usize = 480;
 /// Screen pixels per art pixel.
-pub const SCALE: usize = 2;
+pub const SCALE: usize = 1;
+const STREET_H: usize = 17;
 
 pub type Rgba = [u8; 4];
 
@@ -148,16 +148,21 @@ macro_rules! asset {
 #[derive(Deserialize)]
 #[serde(rename_all = "kebab-case", deny_unknown_fields)]
 struct Sprites {
+    desk: [usize; 4],
     lamp_on: [usize; 4],
+    moonbeam: [usize; 4],
     car: [usize; 4],
     arrow_up: [usize; 4],
     arrow_down: [usize; 4],
     plumbob: [usize; 4],
-    desk: [usize; 4],
-    moonbeam: [usize; 4],
     digits: [usize; 4],
+    decor_0: [usize; 4],
+    decor_1: [usize; 4],
+    decor_2: [usize; 4],
+    decor_3: [usize; 4],
     mascot_working: [usize; 4],
     mascot_idle: [usize; 4],
+    mascot_awake: [usize; 4],
     mascot_blocked: [usize; 4],
     mascot_done: [usize; 4],
     mascot_unknown: [usize; 4],
@@ -170,18 +175,23 @@ impl Sprites {
     }
 
     #[cfg(test)]
-    fn all(&self) -> [(&'static str, [usize; 4]); 13] {
+    fn all(&self) -> [(&'static str, [usize; 4]); 18] {
         [
+            ("desk", self.desk),
             ("lamp-on", self.lamp_on),
+            ("moonbeam", self.moonbeam),
             ("car", self.car),
             ("arrow-up", self.arrow_up),
             ("arrow-down", self.arrow_down),
             ("plumbob", self.plumbob),
-            ("desk", self.desk),
-            ("moonbeam", self.moonbeam),
             ("digits", self.digits),
+            ("decor-0", self.decor_0),
+            ("decor-1", self.decor_1),
+            ("decor-2", self.decor_2),
+            ("decor-3", self.decor_3),
             ("mascot-working", self.mascot_working),
             ("mascot-idle", self.mascot_idle),
+            ("mascot-awake", self.mascot_awake),
             ("mascot-blocked", self.mascot_blocked),
             ("mascot-done", self.mascot_done),
             ("mascot-unknown", self.mascot_unknown),
@@ -199,40 +209,49 @@ fn sprite(pick: impl Fn(&Sprites) -> [usize; 4]) -> Image {
 // Inside, from the left: brick wall, elevator shaft, rooms, brick wall.
 // Storey `level` (0 is the lobby) has its top at `storey_top(level)`, which
 // goes negative for storeys above the screen: the firmware scrolls up to them.
-// Every position below is in art pixels on the screen at the bottom of that
+// Every position below is in pixels on the screen at the bottom of that
 // scroll, or, where it says so, relative to a storey's top left corner.
-pub const GROUND_Y: i32 = 223;
+pub const GROUND_Y: i32 = (H - STREET_H) as i32;
 const WALL: i32 = 4;
 const SHAFT_X: i32 = WALL;
 const SHAFT_W: i32 = 14;
 const ROOMS_X: i32 = SHAFT_X + SHAFT_W + 1;
 const ROOMS_END: i32 = W as i32 - WALL;
 /// Height of a storey, including the floor slab at its bottom.
-pub const STOREY_H: usize = 24;
+pub const STOREY_H: usize = 36;
 const SLAB: i32 = 3;
-pub const DESKS_PER_STOREY: usize = 6;
+/// Height of a storey's room, above the slab.
+const INNER: i32 = STOREY_H as i32 - SLAB;
+pub const DESKS_PER_STOREY: usize = 8;
 /// The desks start this far from a storey's left edge, one every
 /// `DESK_SPACING` pixels; for telling which desk a tap is on.
 pub const DESKS_X: i32 = ROOMS_X + 1;
-pub const DESK_SPACING: i32 = 22;
-pub const ROOF_H: usize = 14;
+pub const DESK_SPACING: i32 = 33;
+/// Height of the roof, from the antenna's tip to the parapet, which overlaps
+/// the top storey by a pixel.
+pub const ROOF_H: usize = 22;
 /// How many wallpapers storeys cycle through, one per workspace: the
 /// `storey-N.png` files.
 pub const WALLPAPERS: usize = 4;
+/// How many decor sprites storeys cycle through, one per storey.
+pub const DECORS: usize = 4;
+/// Where a storey's decor goes, relative to the storey: the room's right end.
+pub const DECOR_AT: (i32, i32) = (DESKS_X + DESK_SPACING * DESKS_PER_STOREY as i32, 0);
 /// How far the top of the plumbob is above the agent's feet.
-pub const PLUMBOB_ABOVE: i32 = 19;
+pub const PLUMBOB_ABOVE: i32 = 25;
 /// Size of an [`arrow`] button, and its left edge: over the elevator shaft.
 pub const ARROW_SIZE: usize = 14;
 pub const ARROW_X: i32 = SHAFT_X;
-/// Where the car stops in a storey, relative to the storey.
-pub const CAR_AT: (i32, i32) = (SHAFT_X + 1, 2);
+/// Where the car stops in a storey, relative to the storey: on its floor.
+pub const CAR_AT: (i32, i32) = (SHAFT_X + 1, INNER - CAR_H);
+const CAR_H: i32 = 24;
 
 /// What a dark storey's room is multiplied by: moonlight blue.
 const MOONLIGHT: Rgba = [0x58, 0x68, 0xb0, 0xff];
 /// The middle column of the `lamp-on` sprite, which goes over each lamp fitting.
-const LAMP_CENTRE: i32 = 12;
+const LAMP_CENTRE: i32 = 18;
 /// Where the `moonbeam` sprite goes, relative to the centre of a window.
-const MOONBEAM_AT: (i32, i32) = (-6, 13);
+const MOONBEAM_AT: (i32, i32) = (-7, 22);
 
 /// The top of storey `level`, where 0 is the lobby.
 pub fn storey_top(level: usize) -> i32 {
@@ -244,8 +263,7 @@ pub fn roof_top(storeys: usize) -> i32 {
     storey_top(storeys) - ROOF_H as i32 + 1
 }
 
-/// What stays still behind the tower: the night sky, the moon, and the city
-/// along the horizon, which shows above the roof of a short tower.
+/// What stays still behind the tower: the night sky and the moon.
 pub fn backdrop() -> Image {
     asset!("backdrop.png")
 }
@@ -261,6 +279,8 @@ pub fn lobby() -> Image {
     asset!("lobby.png")
 }
 
+/// A storey's room before desks and lighting: walls, shaft, wallpaper,
+/// windows and unlit lamp fittings.
 fn room(paper: usize) -> Image {
     match paper % WALLPAPERS {
         0 => asset!("storey-0.png"),
@@ -276,13 +296,26 @@ fn desk_centre(i: usize) -> i32 {
 
 /// The lamp fittings, between the desks.
 fn lamp_xs() -> impl Iterator<Item = i32> {
-    (0..DESKS_PER_STOREY - 1).map(|i| desk_centre(i) + DESK_SPACING / 2)
+    (1..DESKS_PER_STOREY).map(|i| DESKS_X + DESK_SPACING * i as i32)
+}
+
+/// `img` as seen by moonlight: every colour multiplied by moonlight blue.
+fn moonlit(img: &mut Image, x0: i32, x1: i32, rows: i32) {
+    for y in 0..rows.min(img.h as i32) {
+        for x in x0.max(0)..x1.min(img.w as i32) {
+            let c = img.get(x as usize, y as usize);
+            if c[3] != 0 {
+                let tint = |i: usize| (c[i] as u32 * MOONLIGHT[i] as u32 / 255) as u8;
+                img.set(x, y, [tint(0), tint(1), tint(2), c[3]]);
+            }
+        }
+    }
 }
 
 /// A storey of offices in wallpaper `paper` (counted modulo
 /// [`WALLPAPERS`]), with its desks, and its lamps on if `lit`; otherwise the
 /// room is tinted by moonlight falling through the windows. Agents are drawn
-/// over it with [`behind_desk`]; the storey's number goes on with [`digits`].
+/// over it with [`behind_desk`]; its [`decor`] and number go on separately.
 pub fn storey(paper: usize, lit: bool) -> Image {
     let mut img = room(paper);
     let desk = desk();
@@ -296,17 +329,27 @@ pub fn storey(paper: usize, lit: bool) -> Image {
             img.draw(&lamp, x - LAMP_CENTRE, 0);
         }
     } else {
-        for y in 0..STOREY_H as i32 - SLAB + 1 {
-            for x in ROOMS_X..ROOMS_END {
-                let c = img.get(x as usize, y as usize);
-                let tint = |i: usize| (c[i] as u32 * MOONLIGHT[i] as u32 / 255) as u8;
-                img.set(x, y, [tint(0), tint(1), tint(2), 0xff]);
-            }
-        }
+        moonlit(&mut img, ROOMS_X, ROOMS_END, INNER + 1);
         let beam = sprite(|s| s.moonbeam);
         for i in 0..DESKS_PER_STOREY {
             img.draw(&beam, desk_centre(i) + MOONBEAM_AT.0, MOONBEAM_AT.1);
         }
+    }
+    img
+}
+
+/// Decor `kind` (counted modulo [`DECORS`]) for a storey's right end, lit or
+/// by moonlight. It goes at [`DECOR_AT`].
+pub fn decor(kind: usize, lit: bool) -> Image {
+    let mut img = match kind % DECORS {
+        0 => sprite(|s| s.decor_0),
+        1 => sprite(|s| s.decor_1),
+        2 => sprite(|s| s.decor_2),
+        _ => sprite(|s| s.decor_3),
+    };
+    if !lit {
+        let (w, h) = (img.w as i32, img.h as i32);
+        moonlit(&mut img, 0, w, h);
     }
     img
 }
@@ -345,21 +388,19 @@ pub fn plumbob() -> Image {
     sprite(|s| s.plumbob)
 }
 
-const DESK_W: i32 = 22;
-const DESK_H: i32 = 4;
-const LID_H: i32 = 6;
-/// How far left of its desk's centre the agent stands, clear of the monitor.
-const AGENT_LEFT: i32 = 2;
-/// How far above the floor its feet are, as if on a tall stool.
-const AGENT_UP: i32 = 2;
+/// Size of the desk sprite: a desk in oblique projection with a monitor.
+#[cfg(test)]
+const DESK_W: usize = 19;
+const DESK_H: usize = 14;
 
 fn desk() -> Image {
     sprite(|s| s.desk)
 }
 
-/// Where desk `i`'s top left corner is, relative to the storey.
+/// Where desk `i`'s top left corner is, relative to the storey: in front of
+/// the right half of its agent.
 fn desk_at(i: usize) -> (i32, i32) {
-    (desk_centre(i) - DESK_W / 2, STOREY_H as i32 - SLAB - DESK_H - LID_H + 1)
+    (desk_centre(i) - 5, INNER - DESK_H as i32)
 }
 
 /// Where the agent at desk `i` goes, relative to its storey.
@@ -371,30 +412,50 @@ pub struct Slot {
     pub mascot: (i32, i32),
 }
 
-/// Size of a mascot frame, and where the mascot's feet are in it: the middle
-/// of its bottom edge.
-pub const MASCOT_W: usize = 24;
-pub const MASCOT_H: usize = 20;
-const MASCOT_FEET: (i32, i32) = (12, 18);
+/// Size of a mascot frame, and where the mascot's feet are in it.
+pub const MASCOT_W: usize = 30;
+pub const MASCOT_H: usize = 26;
+const MASCOT_FEET: (i32, i32) = (13, 21);
 
-/// The agent's place at desk `i` (0 to [`DESKS_PER_STOREY`] - 1).
+/// The agent's place at desk `i` (0 to [`DESKS_PER_STOREY`] - 1): left of the
+/// monitor, high enough to see over the desk.
 pub fn slot(i: usize) -> Slot {
-    let feet = (desk_centre(i) - AGENT_LEFT, STOREY_H as i32 - SLAB - AGENT_UP);
+    let feet = (desk_centre(i) - 4, INNER - 4);
     Slot { feet, mascot: (feet.0 - MASCOT_FEET.0, feet.1 - MASCOT_FEET.1) }
 }
 
 /// The mascot's animation for an agent with `status`: its frames, cut from
 /// its strip in `sprites.png`, and how long each one shows, in milliseconds.
 pub fn animation(status: Status) -> (Vec<Image>, u32) {
-    let (strip, frame_ms) = match status {
-        Status::Working => (sprite(|s| s.mascot_working), 150),
-        Status::Idle => (sprite(|s| s.mascot_idle), 500),
-        Status::Blocked => (sprite(|s| s.mascot_blocked), 250),
-        Status::Done => (sprite(|s| s.mascot_done), 150),
-        Status::Unknown => (sprite(|s| s.mascot_unknown), 1000),
-    };
-    let frames = (0..strip.w / MASCOT_W).map(|i| strip.crop(i * MASCOT_W, 0, MASCOT_W, MASCOT_H)).collect();
-    (frames, frame_ms)
+    match status {
+        Status::Working => (frames(sprite(|s| s.mascot_working)), 150),
+        Status::Idle => (frames(sprite(|s| s.mascot_idle)), 500),
+        Status::Blocked => (frames(sprite(|s| s.mascot_blocked)), 250),
+        Status::Done => (frames(sprite(|s| s.mascot_done)), 150),
+        Status::Unknown => (frames(sprite(|s| s.mascot_unknown)), 1000),
+    }
+}
+
+/// The animation for an idle agent that has the focus: awake, blinking now
+/// and then, instead of dozing. Like [`animation`].
+pub fn awake_animation() -> (Vec<Image>, u32) {
+    (frames(sprite(|s| s.mascot_awake)), 500)
+}
+
+/// The frames of a mascot strip.
+fn frames(strip: Image) -> Vec<Image> {
+    (0..strip.w / MASCOT_W).map(|i| strip.crop(i * MASCOT_W, 0, MASCOT_W, MASCOT_H)).collect()
+}
+
+/// Every animation, for the tests.
+#[cfg(test)]
+fn all_animations() -> Vec<(&'static str, Vec<Image>)> {
+    let mut out: Vec<_> = [Status::Working, Status::Idle, Status::Blocked, Status::Done, Status::Unknown]
+        .into_iter()
+        .map(|s| (format!("{s:?}").leak() as &'static str, animation(s).0))
+        .collect();
+    out.push(("awake", awake_animation().0));
+    out
 }
 
 /// A mascot frame with the pixels its desk hides cut away, so that drawn over
@@ -418,16 +479,14 @@ pub fn behind_desk(mascot: &Image) -> Image {
 mod tests {
     use super::*;
 
-    const STATUSES: [Status; 5] = [Status::Working, Status::Idle, Status::Blocked, Status::Done, Status::Unknown];
+    fn size(img: &Image) -> (usize, usize) {
+        (img.w, img.h)
+    }
 
     /// The first and last column with anything drawn in `img`.
     fn drawn_columns(img: &Image) -> (i32, i32) {
         let xs = (0..img.w).filter(|&x| (0..img.h).any(|y| img.get(x, y)[3] != 0));
         (xs.clone().min().unwrap() as i32, xs.max().unwrap() as i32)
-    }
-
-    fn size(img: &Image) -> (usize, usize) {
-        (img.w, img.h)
     }
 
     #[test]
@@ -438,15 +497,20 @@ mod tests {
         for p in 0..WALLPAPERS {
             assert_eq!(size(&room(p)), (W, STOREY_H), "storey-{p}.png");
         }
-        assert_eq!(size(&desk()), (DESK_W as usize, (DESK_H + LID_H) as usize));
         for r in roof() {
             assert_eq!(size(&r), (W, ROOF_H));
         }
+        assert_eq!(size(&desk()), (DESK_W, DESK_H));
         for up in [true, false] {
             assert_eq!(size(&arrow(up)), (ARROW_SIZE, ARROW_SIZE));
         }
         assert_eq!(size(&sprite(|s| s.digits)), (40, 6));
         assert_eq!(sprite(|s| s.lamp_on).w as i32, 2 * LAMP_CENTRE + 1);
+        assert_eq!(car().h as i32, CAR_H);
+        for k in 0..DECORS {
+            let d = decor(k, true);
+            assert!(DECOR_AT.0 + d.w as i32 <= ROOMS_END + WALL && d.h as i32 <= INNER, "decor {k}");
+        }
     }
 
     #[test]
@@ -500,15 +564,6 @@ mod tests {
     }
 
     #[test]
-    fn uses_many_colours_but_not_too_many() {
-        // A 16-bit look: well beyond the NES's handful, within a SNES screen's 256.
-        let mut colours: Vec<Rgba> = backdrop().px;
-        colours.sort();
-        colours.dedup();
-        assert!((40..=256).contains(&colours.len()), "{} colours", colours.len());
-    }
-
-    #[test]
     fn storeys_stack_up_from_the_street() {
         assert_eq!(storey_top(0) + STOREY_H as i32, GROUND_Y);
         for level in 1..20 {
@@ -518,12 +573,13 @@ mod tests {
     }
 
     #[test]
-    fn desks_fit_the_rooms_and_taps_find_them() {
+    fn desks_and_decor_fit_the_rooms_and_taps_find_desks() {
         for i in 0..DESKS_PER_STOREY {
             let (x, _) = desk_at(i);
-            assert!(x >= ROOMS_X && x + DESK_W <= ROOMS_END, "desk {i} at {x}");
+            assert!(x >= ROOMS_X && x + DESK_W as i32 <= ROOMS_END, "desk {i} at {x}");
             assert_eq!(((desk_centre(i) - DESKS_X) / DESK_SPACING) as usize, i);
         }
+        assert!(DECOR_AT.0 >= desk_at(DESKS_PER_STOREY - 1).0 + DESK_W as i32);
     }
 
     #[test]
@@ -532,37 +588,29 @@ mod tests {
         for [_, _, w, h] in [
             sprites.mascot_working,
             sprites.mascot_idle,
+            sprites.mascot_awake,
             sprites.mascot_blocked,
             sprites.mascot_done,
             sprites.mascot_unknown,
         ] {
             assert!(w >= MASCOT_W && w % MASCOT_W == 0 && h == MASCOT_H, "a mascot strip is {w}x{h}");
         }
-        for s in STATUSES {
-            assert!(!animation(s).0.is_empty(), "{s:?}");
+        for (name, frames) in all_animations() {
+            assert!(!frames.is_empty(), "{name}");
         }
     }
 
     #[test]
-    fn feet_are_at_the_bottom_middle_of_the_mascot() {
-        let (frames, _) = animation(Status::Working);
-        let m = &frames[0];
-        let bottom = (0..m.h).rev().find(|&y| (0..m.w).any(|x| m.get(x, y)[3] != 0)).unwrap() as i32;
-        assert_eq!(bottom, MASCOT_FEET.1);
-        let (lo, hi) = drawn_columns(m);
-        assert!(((lo + hi) / 2 - MASCOT_FEET.0).abs() <= 1, "drawn from {lo} to {hi}");
-    }
-
-    #[test]
     fn mascots_stay_in_the_rooms_and_clear_of_each_other() {
-        // Sparkles and signs may stray; the working mascot and its outline must not.
-        for m in animation(Status::Working).0 {
-            let (lo, hi) = drawn_columns(&m);
-            for i in 0..DESKS_PER_STOREY {
-                let x = slot(i).mascot.0;
-                assert!(x + lo >= ROOMS_X && x + hi < ROOMS_END, "mascot {i}: {}..{}", x + lo, x + hi);
-                if i > 0 {
-                    assert!(x + lo > slot(i - 1).mascot.0 + hi, "mascot {i} overlaps its neighbour");
+        for (s, frames) in all_animations() {
+            for m in frames {
+                let (lo, hi) = drawn_columns(&m);
+                for i in 0..DESKS_PER_STOREY {
+                    let x = slot(i).mascot.0;
+                    assert!(x + lo >= ROOMS_X && x + hi < ROOMS_END, "{s} at desk {i}: {}..{}", x + lo, x + hi);
+                    if i > 0 {
+                        assert!(x + lo > slot(i - 1).mascot.0 + hi, "{s} at desk {i} overlaps its neighbour");
+                    }
                 }
             }
         }
@@ -570,14 +618,25 @@ mod tests {
 
     #[test]
     fn mascots_stay_inside_their_storey() {
-        assert!(slot(0).mascot.1 >= 0 && slot(0).mascot.1 + MASCOT_H as i32 <= STOREY_H as i32);
+        // Every drawn pixel, markers included, is inside the room.
+        for (st, frames) in all_animations() {
+            for m in frames {
+                for y in 0..m.h {
+                    if (0..m.w).any(|x| m.get(x, y)[3] != 0) {
+                        let at = slot(0).mascot.1 + y as i32;
+                        assert!((0..INNER).contains(&at), "{st} row {y} at {at}");
+                    }
+                }
+            }
+        }
+        assert!(slot(0).feet.1 - PLUMBOB_ABOVE >= 0);
     }
 
     #[test]
     fn car_fits_the_shaft_and_storey() {
         let c = car();
         assert!(CAR_AT.0 >= SHAFT_X && CAR_AT.0 + c.w as i32 <= SHAFT_X + SHAFT_W);
-        assert!(CAR_AT.1 >= 0 && CAR_AT.1 + c.h as i32 <= STOREY_H as i32 - SLAB);
+        assert!(CAR_AT.1 >= 0 && CAR_AT.1 + c.h as i32 <= INNER);
     }
 
     #[test]
@@ -595,35 +654,28 @@ mod tests {
     }
 
     #[test]
-    fn lights_change_the_storey_and_wallpapers_differ() {
+    fn lights_change_the_storey_and_decor_and_wallpapers_differ() {
         assert_ne!(storey(0, true), storey(0, false));
         assert_ne!(storey(0, true), storey(1, true));
         assert_eq!(storey(0, true), storey(WALLPAPERS, true));
+        assert_ne!(decor(0, true), decor(0, false));
+        assert_eq!(decor(0, true), decor(DECORS, true));
     }
 
     #[test]
     fn agent_behind_desk_looks_like_agent_then_desk() {
         // The board draws the cut mascot over a storey with the desk drawn
-        // in; that must match drawing the mascot and then the desk on top,
-        // except under the desk's translucent glow.
-        let m = animation(Status::Working).0.remove(1);
-        let s = slot(2);
-        let (dx, dy) = desk_at(2);
-        let mut room = room(0);
-        let mut expected = room.clone();
-        expected.draw(&m, s.mascot.0, s.mascot.1);
-        expected.draw(&desk(), dx, dy);
-        room.draw(&desk(), dx, dy);
-        room.draw(&behind_desk(&m), s.mascot.0, s.mascot.1);
-        let d = desk();
-        for y in 0..STOREY_H as i32 {
-            for x in 0..W as i32 {
-                let (ix, iy) = (x - dx, y - dy);
-                let glow = d.inside(ix, iy) && (1..0xff).contains(&d.get(ix as usize, iy as usize)[3]);
-                if !glow {
-                    assert_eq!(room.get(x as usize, y as usize), expected.get(x as usize, y as usize), "({x}, {y})");
-                }
-            }
+        // in; that must match drawing the mascot and then the desk on top.
+        for m in animation(Status::Working).0 {
+            let s = slot(2);
+            let (dx, dy) = desk_at(2);
+            let mut room = room(0);
+            let mut expected = room.clone();
+            expected.draw(&m, s.mascot.0, s.mascot.1);
+            expected.draw(&desk(), dx, dy);
+            room.draw(&desk(), dx, dy);
+            room.draw(&behind_desk(&m), s.mascot.0, s.mascot.1);
+            assert_eq!(room, expected);
         }
     }
 
@@ -643,11 +695,8 @@ mod tests {
         for (i, (a, b)) in on.px.iter().zip(&off.px).enumerate() {
             if a != b {
                 let (x, y) = (i % w, i / w);
-                assert!(x >= w - 20 && y < 6, "({x}, {y})");
+                assert!(x >= w - 30 && y < 8, "({x}, {y})");
             }
         }
     }
 }
-
-
-

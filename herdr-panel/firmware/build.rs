@@ -18,8 +18,8 @@ use std::{
 
 use herdr_panel_protocol::Status;
 use herdr_panel_scene::{
-    ARROW_X, CAR_AT, DESK_SPACING, DESKS_PER_STOREY, DESKS_X, GROUND_Y, Image, PLUMBOB_ABOVE, ROOF_H, SCALE, STOREY_H, WALLPAPERS,
-    animation, arrow, backdrop, behind_desk, car, digits, lobby, number_at, plumbob, roof, slot, storey, street,
+    ARROW_SIZE, ARROW_X, CAR_AT, DECOR_AT, DECORS, DESK_SPACING, DESKS_PER_STOREY, DESKS_X, GROUND_Y, Image, PLUMBOB_ABOVE, ROOF_H, SCALE, STOREY_H, WALLPAPERS,
+    animation, arrow, awake_animation, backdrop, behind_desk, car, decor, digits, lobby, number_at, plumbob, roof, slot, storey, street,
 };
 use oxivgl_build::ImageConfig;
 
@@ -97,6 +97,17 @@ fn main() {
         )
         .unwrap();
     }
+    let (frames, frame_ms) = awake_animation();
+    let mut awake = String::new();
+    for (i, frame) in frames.iter().enumerate() {
+        let symbol = format!("mascot_awake_{i}");
+        let png = out.join(format!("{symbol}.png"));
+        write_png(&png, &behind_desk(frame), true);
+        convert(&cfg, &out, &symbol, &png, "ARGB8888");
+        writeln!(declarations, "oxivgl::image_declare!({symbol});").unwrap();
+        write!(awake, "{symbol}() as *const _ as *const core::ffi::c_void, ").unwrap();
+    }
+    let awake_ms = frames.len() as u32 * frame_ms;
 
     // The plumbob bobs: one art pixel up and down.
     let bob = plumbob();
@@ -132,6 +143,14 @@ fn main() {
             writeln!(storeys, "        ({paper}, {lit}) => {symbol}(),").unwrap();
         }
     }
+    let mut decors = String::new();
+    for kind in 0..DECORS {
+        for lit in [false, true] {
+            let symbol = format!("decor_{kind}_{}", if lit { "lit" } else { "dark" });
+            image(&symbol, &decor(kind, lit), true);
+            writeln!(decors, "        ({kind}, {lit}) => {symbol}(),").unwrap();
+        }
+    }
     let mut digit_arms = String::new();
     for (d, img) in digits().iter().enumerate() {
         image(&format!("digit_{d}"), img, true);
@@ -160,6 +179,9 @@ fn main() {
          /// The animation for each agent status. Call once: it leaks the frame lists, which\n\
          /// LVGL keeps pointers to.\n\
          pub fn loops() -> [(Status, Loop); {n}] {{\n    [\n{loops}    ]\n}}\n\n\
+         /// The animation for an idle agent with the focus: awake, blinking. Call\n\
+         /// once, like [`loops`].\n\
+         pub fn awake() -> Loop {{\n    Loop {{ frames: Box::leak(Box::new([{awake}])), duration_ms: {awake_ms} }}\n}}\n\n\
          /// The marker over the focused agent, bobbing. Call once, like [`loops`].\n\
          pub fn plumbob() -> Loop {{\n    Loop {{ frames: Box::leak(Box::new([{pointers}])), duration_ms: 1200 }}\n}}\n\n\
          /// The roof, its antenna light blinking. Call once, like [`loops`].\n\
@@ -168,6 +190,9 @@ fn main() {
          /// A storey in wallpaper `paper` (modulo [`WALLPAPERS`]), its lights on or off.\n\
          pub fn storey_image(paper: usize, lit: bool) -> &'static oxivgl::widgets::lv_image_dsc_t {{\n\
          \x20   match (paper % WALLPAPERS, lit) {{\n{storeys}        _ => unreachable!(),\n    }}\n}}\n\n\
+         /// Decor `kind` (modulo [`DECORS`]) for a storey's right end, lit or not.\n\
+         pub fn decor_image(kind: usize, lit: bool) -> &'static oxivgl::widgets::lv_image_dsc_t {{\n\
+         \x20   match (kind % DECORS, lit) {{\n{decors}        _ => unreachable!(),\n    }}\n}}\n\n\
          /// Digit `d` (modulo 10) of a storey number.\n\
          pub fn digit_image(d: usize) -> &'static oxivgl::widgets::lv_image_dsc_t {{\n\
          \x20   match d % 10 {{\n{digit_arms}        _ => unreachable!(),\n    }}\n}}\n\n\
@@ -178,19 +203,26 @@ fn main() {
          pub const STOREY_H: i32 = {storey_h};\n\
          pub const ROOF_H: i32 = {roof_h};\n\
          pub const WALLPAPERS: usize = {WALLPAPERS};\n\
+         pub const DECORS: usize = {DECORS};\n\
+         /// Where a storey's decor goes, relative to the storey.\n\
+         pub const DECOR_AT: (i32, i32) = {decor_at};\n\
          pub const DESKS_PER_STOREY: usize = {DESKS_PER_STOREY};\n\
          /// Where desks start in a storey, and how far apart they are.\n\
          pub const DESKS_X: i32 = {desks_x};\n\
          pub const DESK_SPACING: i32 = {desk_spacing};\n\
          /// Where the car stops in a storey, relative to the storey.\n\
          pub const CAR_AT: (i32, i32) = {car_at};\n\
-         /// The left edge of the scroll buttons, over the shaft.\n\
+         /// The left edge and size of the scroll buttons, over the shaft.\n\
          pub const ARROW_X: i32 = {arrow_x};\n\
+         pub const ARROW_SIZE: i32 = {arrow_size};\n\
+         /// The plumbob's width.\n\
+         pub const PLUMBOB_W: i32 = {plumbob_w};\n\
          /// How far the plumbob's top is above the agent's feet.\n\
          pub const PLUMBOB_ABOVE: i32 = {plumbob_above};\n\
          /// Where a storey number's first digit goes, for numbers of 1 to 3\n\
-         /// digits; each digit is 8 pixels wide.\n\
+         /// digits; each digit is `DIGIT_W` pixels wide.\n\
          pub const NUMBER_AT: [(i32, i32); 3] = [{number_at}];\n\
+         pub const DIGIT_W: i32 = {digit_w};\n\
          /// Where the agents at each desk go, relative to the storey.\n\
          pub const SLOTS: [Slot; {DESKS_PER_STOREY}] = [\n{slots}];\n",
         n = ANIMATIONS.len(),
@@ -201,12 +233,16 @@ fn main() {
         arrow_up = image_fn("arrow_up", "The button that scrolls up a storey."),
         arrow_down = image_fn("arrow_down", "The button that scrolls down a storey."),
         arrow_x = ARROW_X * scale,
+        arrow_size = ARROW_SIZE as i32 * scale,
+        plumbob_w = plumbob().w as i32 * scale,
+        digit_w = digits()[0].w as i32 * scale,
         ground = GROUND_Y * scale,
         storey_h = STOREY_H as i32 * scale,
         roof_h = ROOF_H as i32 * scale,
         desks_x = DESKS_X * scale,
         desk_spacing = DESK_SPACING * scale,
         car_at = at(CAR_AT),
+        decor_at = at(DECOR_AT),
         plumbob_above = PLUMBOB_ABOVE * scale,
         number_at = number_at.join(", "),
     );

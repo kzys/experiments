@@ -1,10 +1,11 @@
 # herdr-panel
 
 A small touch display (Freenove FNK0104N, ESP32-S3, 3.5" 320x480) that shows
-herdr as a tower in the style of SimTower and 16-bit console games: storeys
-of six desks, one or more per workspace, and each agent as the Claude Code
-mascot at a desk, animated by what the agent is doing. The elevator rides to
-the focused agent; arrow buttons over the shaft scroll a tall tower.
+herdr as a tower in the style of SimTower, Tiny Tower and 16-bit console
+games: storeys of eight desks, one or more per workspace, and each agent as
+the Claude Code mascot at a desk, animated by what the agent is doing. The
+elevator rides to the focused agent; arrow buttons over the shaft scroll a
+tall tower.
 Tapping a mascot focuses that agent in herdr. The board talks to a bridge on
 the laptop over USB serial.
 
@@ -19,9 +20,12 @@ All Rust.
   `serde-json-core` on the board can parse them. Tests check the board's parser
   against the bridge's output.
 - `assets/`: the tower's art as PNG files (see Art below).
+- `art-tools/`: Python scripts that draw the art: `demo.py` draws a mock-up
+  of the whole screen, `export.py` writes the assets from the same drawings.
 - `scene/`: loads the art and puts the tower together on the laptop: desks
-  onto storeys, lamps lit or the room tinted by moonlight when every agent
-  there is idle, and the mascot's frames, cut where their desk hides them.
+  onto storeys, lamps lit or the room tinted by moonlight (when every agent
+  there is idle and none has the focus), and the mascot's frames, cut where
+  their desk hides them.
   Also says where everything goes and how fast each animation plays. `cargo run -p
   herdr-panel-scene --example preview -- out.png 2,1,8 [scroll]` draws the
   screen with workspaces of two, one and eight agents.
@@ -33,8 +37,9 @@ All Rust.
   full-screen image; the street, lobby and storeys sit in front of it in a
   container that the arrow buttons scroll a storey at a time (a jump: redrawing
   the whole screen is too slow to slide). Each workspace (the pane id's part
-  before `:`) takes as many storeys as its agents need. Each agent is a mascot
-  looping its frames; a green plumbob bobs over the focused one, the elevator
+  before `:`) takes as many storeys as its agents need; each storey gets a
+  piece of decor at its right end. Each agent is a mascot looping its frames;
+  a green plumbob bobs over the focused one, the elevator
   car slides to its storey, and the view jumps there unless an arrow was
   pressed in the last 10 s. LVGL gets 512 KB of PSRAM on top of its 48 KB
   internal pool, for the widgets of a tall tower.
@@ -45,46 +50,53 @@ All Rust.
 
 ## Art
 
-The PNGs in `assets/` are the source: edit them in any pixel editor and
-rebuild the firmware. They are at half the screen's resolution (the board
-shows each pixel as 2x2), and colours are cut to the SNES's 15 bits on
-loading, so a colour may shift by up to 7 per channel. Translucent pixels
-blend (the lamp glow, the neon sign's halo).
+Everything is drawn pixel for pixel on the 320x480 screen; each agent has a
+33x36 space. The art is drawn by `art-tools/demo.py` (a mock-up of the
+whole screen, to try a look) and written to `assets/` by
+`art-tools/export.py`:
+
+    python art-tools/demo.py /tmp/demo        # demo.png, demo-3x.png, demo-touch*.png
+    python art-tools/export.py assets
+
+The PNGs in `assets/` are what the build reads, so they can also be touched
+up in a pixel editor; a re-export overwrites such edits. Colours are cut to
+15 bits on loading, so a colour may shift by up to 7 per channel.
+Translucent pixels blend (the lamp glow, the moonbeams, the neon sign's
+halo).
 
 | file | what |
 | --- | --- |
-| `backdrop.png` | sky, moon and city, 160x240; stays still |
-| `street.png` | pavement and road below the tower, 160x17 |
-| `lobby.png` | storey 0, 160x24 |
-| `storey-0.png` .. `storey-3.png` | a storey's room, one wallpaper per workspace in turn, 160x24, with no desks and the lamps off |
-| `roof-on.png`, `roof-off.png` | the roof, its antenna light on and off, 160x14 |
-| `sprites.png` | the small sprites, on one sheet; `sprites.yaml` gives each one's `[x, y, width, height]` |
+| `backdrop.png` | sky and moon, 320x480; stays still |
+| `street.png` | pavement and road below the tower, 320x17 |
+| `lobby.png` | storey 0, 320x36 |
+| `storey-0.png` .. `storey-3.png` | a storey's room, one wallpaper per workspace in turn, 320x36, with no desks and the lamps off |
+| `roof-on.png`, `roof-off.png` | the roof, its antenna light on and off, 320x22 |
+| `sprites.png` | the small sprites, decor and mascot, on one sheet; `sprites.yaml` gives each one's `[x, y, width, height]` |
 
 The sprites in `sprites.png`:
 
 | name | what |
 | --- | --- |
-| `desk` | a desk with its monitor, 22x10; drawn at each of the six desk places |
+| `desk` | a desk in oblique projection with a monitor, 19x14; drawn at each desk |
 | `lamp-on` | a lit bulb and its light, drawn over each lamp fitting |
 | `moonbeam` | moonlight through a window, for storeys with the lights off |
+| `decor-0` .. `decor-3` | bookshelf, water cooler, plant, coffee machine: one per storey in turn, at its right end |
 | `car` | the elevator car |
 | `arrow-up`, `arrow-down` | the scroll buttons, 14x14 |
 | `digits` | 0 to 9 for storey numbers, 4x6 each, in a row |
 | `plumbob` | the marker over the focused agent |
-| `mascot-working`, `mascot-idle`, `mascot-blocked`, `mascot-done`, `mascot-unknown` | the mascot's animation for each herdr status: frames of 24x20 in a row, as many as the strip is wide |
+| `mascot-working`, `mascot-idle`, `mascot-awake`, `mascot-blocked`, `mascot-done`, `mascot-unknown` | the mascot's animations: frames of 30x26 in a row, as many as the strip is wide |
 
-To move or resize a sprite, change it in `sprites.png` and its entry in
-`sprites.yaml`. A misspelt or missing name, a sprite outside the sheet, or
-two that overlap fail the scene tests.
+A misspelt or missing name in `sprites.yaml`, a sprite outside the sheet, or
+two that overlap fail the scene tests. Sizes and positions (where desks,
+lamps, decor and agents go) are constants in `scene/src/lib.rs`, as are the
+mascot's frame timings; its tests fail if a PNG no longer fits them. A
+mascot frame has the feet at (13, 21); the desk hides the mascot's lower
+right.
 
-Sizes and positions (where desks, lamps and agents go) are constants in
-`scene/src/lib.rs`, as are the mascot's frame timings; its tests fail if a
-PNG's size no longer matches them. A mascot frame has the feet at the
-middle of its bottom edge (12, 18), and the desk hides its lower part.
-
-The mascot started as the terminal's block-character art
+The mascot is the terminal's block-character art
 `▐▛███▜▌ / ▝▜█████▛▘ / ▘▘ ▝▝`, each pixel one wide and two tall like a
-character cell, with a dark outline that also makes the eyes.
+character cell, flat, with a dark outline that also makes the eyes.
 
 ## Animations
 
@@ -92,12 +104,14 @@ character cell, with a dark outline that also makes the eyes.
 | --- | --- |
 | working | running on the spot, arms swinging |
 | idle | dozing, eyes half shut, "z"s rising |
+| idle, with the focus | awake, blinking now and then |
 | blocked | waving, with a blinking "!" |
 | done | hopping, arms up, sparkles |
 | unknown | a "?" above it |
 
-Frames show for 150 ms when working or done, 250 ms when blocked, 500 ms when
-idle, and 1 s (a single frame) when unknown.
+Markers ("z", "!", "?", sparkles) have a dark border. Frames show for 150 ms
+when working or done, 250 ms when blocked, 500 ms when idle or awake, and 1 s
+(a single frame) when unknown.
 
 ## Messages
 
@@ -108,7 +122,7 @@ only when all announced agents arrived: decoding a whole state at once needs
 several copies of it on the board's stack, which overflowed it. Board to
 bridge: `"Hello"` (sent at start and every 3 s until a state arrives) and
 `{"Focus":{"agent":"w1:p2"}}`. `status` is `idle`, `working`, `blocked`, `done`
-or `unknown`. Limits: 100 agents, labels cut to 24 bytes (the board does not
+or `unknown`. Limits: 250 agents, labels cut to 24 bytes (the board does not
 show labels at the moment).
 
 The board's log output shares the port. Lines that do not start with `{` or `"`
