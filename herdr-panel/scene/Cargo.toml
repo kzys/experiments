@@ -7,3 +7,5 @@ publish = false
 [dependencies]
 herdr-panel-art = { path = "../art" }
 png = "0.17"
+serde = { version = "1", features = ["derive"] }
+serde-saphyr = "2"

@@ -62,14 +62,24 @@ blend (the lamp glow, the neon sign's halo).
 | `street.png` | pavement and road below the tower, 160x17 |
 | `lobby.png` | storey 0, 160x24 |
 | `storey-0.png` .. `storey-3.png` | a storey's room, one wallpaper per workspace in turn, 160x24, with no desks and the lamps off |
-| `desk.png` | a desk with its monitor, 22x10; drawn at each of the six desk places |
-| `lamp-on.png` | a lit bulb and its light, drawn over each lamp fitting |
-| `moonbeam.png` | moonlight through a window, for storeys with the lights off |
 | `roof-on.png`, `roof-off.png` | the roof, its antenna light on and off, 160x14 |
-| `car.png` | the elevator car |
-| `arrow-up.png`, `arrow-down.png` | the scroll buttons, 14x14 |
-| `digits.png` | 0 to 9 for storey numbers, 4x6 each, in a row |
-| `plumbob.png` | the marker over the focused agent |
+| `sprites.png` | the small sprites, on one sheet; `sprites.yaml` gives each one's `[x, y, width, height]` |
+
+The sprites in `sprites.png`:
+
+| name | what |
+| --- | --- |
+| `desk` | a desk with its monitor, 22x10; drawn at each of the six desk places |
+| `lamp-on` | a lit bulb and its light, drawn over each lamp fitting |
+| `moonbeam` | moonlight through a window, for storeys with the lights off |
+| `car` | the elevator car |
+| `arrow-up`, `arrow-down` | the scroll buttons, 14x14 |
+| `digits` | 0 to 9 for storey numbers, 4x6 each, in a row |
+| `plumbob` | the marker over the focused agent |
+
+To move or resize a sprite, change it in `sprites.png` and its entry in
+`sprites.yaml`. A misspelt or missing name, a sprite outside the sheet, or
+two that overlap fail the scene tests.
 
 Sizes and positions (where desks, lamps and agents go) are constants in
 `scene/src/lib.rs`; its tests fail if a PNG's size no longer matches them.

@@ -1,0 +1,11 @@
+# Where each sprite is in sprites.png: [x, y, width, height], in pixels.
+# Sizes must match what the layout in scene/src/lib.rs expects; its
+# tests check them.
+lamp-on: [0, 0, 25, 21]
+car: [26, 0, 12, 19]
+arrow-up: [39, 0, 14, 14]
+arrow-down: [54, 0, 14, 14]
+plumbob: [69, 0, 5, 7]
+desk: [0, 22, 22, 10]
+moonbeam: [23, 22, 17, 8]
+digits: [41, 22, 40, 6]

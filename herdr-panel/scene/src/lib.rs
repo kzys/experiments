@@ -4,7 +4,8 @@
 //! focused agent.
 //!
 //! The art is PNG files in `assets/`, at half the screen's resolution: the
-//! board shows each pixel as 2x2. Colours are cut to the SNES's 15 bits on
+//! board shows each pixel as 2x2. Full-width pieces have a file each; small
+//! sprites share `sprites.png`, and `sprites.yaml` says where each one is. Colours are cut to the SNES's 15 bits on
 //! loading. This crate loads them and puts them together: desks onto storeys,
 //! lamps lit or the room tinted by moonlight, and the mascot frames, which
 //! come from the art crate and are cut where their desk hides them. The
@@ -16,6 +17,7 @@
 //! The positions here must match the art: the tests check that they do.
 
 use herdr_panel_art::{CANVAS_H, CANVAS_W, Grid, HEIGHT, Ink, ORIGIN, WIDTH};
+use serde::Deserialize;
 
 /// Size of the screen in art pixels.
 pub const W: usize = 160;
@@ -141,6 +143,47 @@ macro_rules! asset {
     };
 }
 
+/// Where each small sprite is in `sprites.png`: `[x, y, width, height]`.
+#[derive(Deserialize)]
+#[serde(rename_all = "kebab-case", deny_unknown_fields)]
+struct Sprites {
+    lamp_on: [usize; 4],
+    car: [usize; 4],
+    arrow_up: [usize; 4],
+    arrow_down: [usize; 4],
+    plumbob: [usize; 4],
+    desk: [usize; 4],
+    moonbeam: [usize; 4],
+    digits: [usize; 4],
+}
+
+impl Sprites {
+    fn load() -> Self {
+        let yaml = include_str!("../../assets/sprites.yaml");
+        serde_saphyr::from_str(yaml).unwrap_or_else(|e| panic!("sprites.yaml: {e}"))
+    }
+
+    #[cfg(test)]
+    fn all(&self) -> [(&'static str, [usize; 4]); 8] {
+        [
+            ("lamp-on", self.lamp_on),
+            ("car", self.car),
+            ("arrow-up", self.arrow_up),
+            ("arrow-down", self.arrow_down),
+            ("plumbob", self.plumbob),
+            ("desk", self.desk),
+            ("moonbeam", self.moonbeam),
+            ("digits", self.digits),
+        ]
+    }
+}
+
+/// The small sprite that `pick` locates, cut out of `sprites.png`.
+fn sprite(pick: impl Fn(&Sprites) -> [usize; 4]) -> Image {
+    let [x, y, w, h] = pick(&Sprites::load());
+    asset!("sprites.png").crop(x, y, w, h)
+}
+
 // The tower fills the screen's width and stands on the pavement at GROUND_Y.
 // Inside, from the left: brick wall, elevator shaft, rooms, brick wall.
 // Storey `level` (0 is the lobby) has its top at `storey_top(level)`, which
@@ -175,9 +218,9 @@ pub const CAR_AT: (i32, i32) = (SHAFT_X + 1, 2);
 
 /// What a dark storey's room is multiplied by: moonlight blue.
 const MOONLIGHT: Rgba = [0x58, 0x68, 0xb0, 0xff];
-/// The middle column of `lamp-on.png`, which goes over each lamp fitting.
+/// The middle column of the `lamp-on` sprite, which goes over each lamp fitting.
 const LAMP_CENTRE: i32 = 12;
-/// Where `moonbeam.png` goes, relative to the centre of a window.
+/// Where the `moonbeam` sprite goes, relative to the centre of a window.
 const MOONBEAM_AT: (i32, i32) = (-6, 13);
 
 /// The top of storey `level`, where 0 is the lobby.
@@ -237,7 +280,7 @@ pub fn storey(paper: usize, lit: bool) -> Image {
         img.draw(&desk, dx, dy);
     }
     if lit {
-        let lamp = asset!("lamp-on.png");
+        let lamp = sprite(|s| s.lamp_on);
         for x in lamp_xs() {
             img.draw(&lamp, x - LAMP_CENTRE, 0);
         }
@@ -249,7 +292,7 @@ pub fn storey(paper: usize, lit: bool) -> Image {
                 img.set(x, y, [tint(0), tint(1), tint(2), 0xff]);
             }
         }
-        let beam = asset!("moonbeam.png");
+        let beam = sprite(|s| s.moonbeam);
         for i in 0..DESKS_PER_STOREY {
             img.draw(&beam, desk_centre(i) + MOONBEAM_AT.0, MOONBEAM_AT.1);
         }
@@ -257,9 +300,9 @@ pub fn storey(paper: usize, lit: bool) -> Image {
     img
 }
 
-/// The digits 0 to 9 for storey numbers, cut from `digits.png`.
+/// The digits 0 to 9 for storey numbers, cut from the `digits` strip.
 pub fn digits() -> [Image; 10] {
-    let sheet = asset!("digits.png");
+    let sheet = sprite(|s| s.digits);
     core::array::from_fn(|d| sheet.crop(4 * d, 0, 4, sheet.h))
 }
 
@@ -277,18 +320,18 @@ pub fn roof() -> [Image; 2] {
 
 /// The elevator car.
 pub fn car() -> Image {
-    asset!("car.png")
+    sprite(|s| s.car)
 }
 
 /// The button that scrolls up a storey if `up`, else down.
 pub fn arrow(up: bool) -> Image {
-    if up { asset!("arrow-up.png") } else { asset!("arrow-down.png") }
+    sprite(|s| if up { s.arrow_up } else { s.arrow_down })
 }
 
 /// The marker over the focused agent. Its top goes [`PLUMBOB_ABOVE`] over
 /// the agent's feet.
 pub fn plumbob() -> Image {
-    asset!("plumbob.png")
+    sprite(|s| s.plumbob)
 }
 
 const DESK_W: i32 = 22;
@@ -300,7 +343,7 @@ const AGENT_LEFT: i32 = 2;
 const AGENT_UP: i32 = 2;
 
 fn desk() -> Image {
-    asset!("desk.png")
+    sprite(|s| s.desk)
 }
 
 /// Where desk `i`'s top left corner is, relative to the storey.
@@ -401,8 +444,32 @@ mod tests {
         for up in [true, false] {
             assert_eq!(size(&arrow(up)), (ARROW_SIZE, ARROW_SIZE));
         }
-        assert_eq!(size(&asset!("digits.png")), (40, 6));
-        assert_eq!(asset!("lamp-on.png").w as i32, 2 * LAMP_CENTRE + 1);
+        assert_eq!(size(&sprite(|s| s.digits)), (40, 6));
+        assert_eq!(sprite(|s| s.lamp_on).w as i32, 2 * LAMP_CENTRE + 1);
+    }
+
+    #[test]
+    fn sprites_sit_inside_the_sheet_without_overlapping() {
+        let sheet = asset!("sprites.png");
+        let all = Sprites::load().all();
+        for (name, [x, y, w, h]) in all {
+            assert!(w > 0 && h > 0 && x + w <= sheet.w && y + h <= sheet.h, "{name} is outside sprites.png");
+        }
+        for (i, (a, [ax, ay, aw, ah])) in all.iter().enumerate() {
+            for (b, [bx, by, bw, bh]) in &all[i + 1..] {
+                let apart = ax + aw <= *bx || bx + bw <= *ax || ay + ah <= *by || by + bh <= *ay;
+                assert!(apart, "{a} and {b} overlap");
+            }
+        }
+    }
+
+    #[test]
+    fn a_misspelt_or_missing_sprite_is_an_error() {
+        let good = include_str!("../../assets/sprites.yaml");
+        assert!(serde_saphyr::from_str::<Sprites>(good).is_ok());
+        assert!(serde_saphyr::from_str::<Sprites>(&good.replace("plumbob:", "plumbbob:")).is_err());
+        let missing: String = good.lines().filter(|l| !l.starts_with("car:")).map(|l| format!("{l}\n")).collect();
+        assert!(serde_saphyr::from_str::<Sprites>(&missing).is_err());
     }
 
     #[test]
@@ -589,4 +656,5 @@ mod tests {
         }
     }
 }
+
 
