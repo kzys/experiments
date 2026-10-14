@@ -149,7 +149,7 @@ Python: the build converts the animation frames with LVGL's image tool):
     cargo +esp build --release
     espflash flash --chip esp32s3 --flash-size 16mb target/xtensa-esp32s3-none-elf/release/herdr-panel-firmware
 
-Tests: `cargo test` in this directory.
+Tests: `make` (which runs `cargo test`) in this directory; CI runs the same.
 
 ## Notes
 
