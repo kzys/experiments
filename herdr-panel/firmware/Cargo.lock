@@ -1315,6 +1315,7 @@ name = "herdr-panel-scene"
 version = "0.1.0"
 dependencies = [
  "herdr-panel-art",
+ "png",
 ]
 
 [[package]]

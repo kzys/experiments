@@ -23,12 +23,11 @@ All Rust.
   turned into pixels (the two gaps in the top row are the eyes). One looping
   animation per state, plus a random "play" mood that is written but not used yet.
   Each pixel is drawn one wide and two tall, like the terminal's character cells.
-- `scene/`: the tower, drawn on the laptop at half the screen's resolution
-  and shown at twice the size, in SNES colours (5 bits per channel, tested)
-  with 3-tone shading, banded gradients and translucent glows: night sky and
-  city, street, lobby, storeys with their desks (lights off when every agent
-  there is idle), digits for storey numbers, roof, elevator, scroll arrows,
-  and the flat, outlined mascot, cut where its desk hides it. `cargo run -p
+- `assets/`: the tower's art as PNG files (see Art below).
+- `scene/`: loads the art and puts the tower together on the laptop: desks
+  onto storeys, lamps lit or the room tinted by moonlight when every agent
+  there is idle, and the flat, outlined mascot frames, cut where their desk
+  hides them. Also says where everything goes. `cargo run -p
   herdr-panel-scene --example preview -- out.png 2,1,8 [scroll]` draws the
   screen with workspaces of two, one and eight agents.
 - `bridge/`: reads `agent.list` and `workspace.list` from herdr's socket
@@ -48,6 +47,34 @@ All Rust.
   them with LVGL's `LVGLImage.py` and compiles them in.
   Separate from the workspace because it needs the Xtensa toolchain
   (`cargo +esp`).
+
+## Art
+
+The PNGs in `assets/` are the source: edit them in any pixel editor and
+rebuild the firmware. They are at half the screen's resolution (the board
+shows each pixel as 2x2), and colours are cut to the SNES's 15 bits on
+loading, so a colour may shift by up to 7 per channel. Translucent pixels
+blend (the lamp glow, the neon sign's halo).
+
+| file | what |
+| --- | --- |
+| `backdrop.png` | sky, moon and city, 160x240; stays still |
+| `street.png` | pavement and road below the tower, 160x17 |
+| `lobby.png` | storey 0, 160x24 |
+| `storey-0.png` .. `storey-3.png` | a storey's room, one wallpaper per workspace in turn, 160x24, with no desks and the lamps off |
+| `desk.png` | a desk with its monitor, 22x10; drawn at each of the six desk places |
+| `lamp-on.png` | a lit bulb and its light, drawn over each lamp fitting |
+| `moonbeam.png` | moonlight through a window, for storeys with the lights off |
+| `roof-on.png`, `roof-off.png` | the roof, its antenna light on and off, 160x14 |
+| `car.png` | the elevator car |
+| `arrow-up.png`, `arrow-down.png` | the scroll buttons, 14x14 |
+| `digits.png` | 0 to 9 for storey numbers, 4x6 each, in a row |
+| `plumbob.png` | the marker over the focused agent |
+
+Sizes and positions (where desks, lamps and agents go) are constants in
+`scene/src/lib.rs`; its tests fail if a PNG's size no longer matches them.
+The mascot is not a PNG: its poses come from the terminal block art in
+`art/`.
 
 ## Animations
 

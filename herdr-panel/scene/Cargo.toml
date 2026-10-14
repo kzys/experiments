@@ -6,6 +6,4 @@ publish = false
 
 [dependencies]
 herdr-panel-art = { path = "../art" }
-
-[dev-dependencies]
 png = "0.17"

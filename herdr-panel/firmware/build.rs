@@ -1,9 +1,10 @@
 //! Links the ESP-HAL linker script and turns the art into LVGL images: the
-//! tower's backdrop, street, lobby, storeys, digits, roof and elevator from
-//! the scene crate, and each mascot frame from the art crate (cut where its
-//! desk hides it), are written as PNGs, converted with LVGL's `LVGLImage.py`
-//! (needs Python with `pypng` and `lz4`) into `lv_image_dsc_t`s, and compiled
-//! in. `frames.rs`, included by the firmware, declares them, lists each
+//! tower's backdrop, street, lobby, storeys, digits, roof and elevator, which
+//! the scene crate puts together from the PNGs in `assets/`, and each mascot
+//! frame from the art crate (cut where its desk hides it). Each is written as
+//! a PNG at screen size, converted with LVGL's `LVGLImage.py` (needs Python
+//! with `pypng` and `lz4`) into an `lv_image_dsc_t`, and compiled in.
+//! `frames.rs`, included by the firmware, declares them, lists each
 //! animation's frames and says where everything goes.
 
 use std::{
@@ -79,6 +80,7 @@ fn main() {
     println!("cargo:rustc-link-arg=-Tlinkall.x");
     println!("cargo:rerun-if-changed=../art/src/lib.rs");
     println!("cargo:rerun-if-changed=../scene/src/lib.rs");
+    println!("cargo:rerun-if-changed=../assets");
     println!("cargo:rerun-if-changed=build.rs");
 
     let cfg = ImageConfig::from_env();

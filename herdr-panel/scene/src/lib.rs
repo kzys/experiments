@@ -1,19 +1,23 @@
-//! A tower seen from the side at night, in the style of a 16-bit console game
-//! (colours from the SNES's 15-bit range shaded in ramps, gradients in
-//! horizontal bands, translucent glows, layered backgrounds, dark coloured
-//! outlines), after tower-building games like SimTower: one storey per herdr
-//! workspace stacked on a lobby, a desk per agent, and an elevator that rides
-//! to the focused agent.
+//! A tower seen from the side at night, in the style of a 16-bit console game,
+//! after tower-building games like SimTower: storeys of desks stacked on a
+//! lobby, one or more per herdr workspace, and an elevator that rides to the
+//! focused agent.
 //!
-//! Everything is drawn at half the screen's resolution and shown at twice the
-//! size, so one art pixel is 2x2 screen pixels. The backdrop (sky and city)
-//! stays still; the street, lobby, storeys, roof, elevator car and mascots
-//! are separate images that the firmware stacks at the positions given here,
-//! in art pixels, and scrolls when the tower is taller than the screen.
+//! The art is PNG files in `assets/`, at half the screen's resolution: the
+//! board shows each pixel as 2x2. Colours are cut to the SNES's 15 bits on
+//! loading. This crate loads them and puts them together: desks onto storeys,
+//! lamps lit or the room tinted by moonlight, and the mascot frames, which
+//! come from the art crate and are cut where their desk hides them. The
+//! backdrop (sky and city) stays still; the street, lobby, storeys, roof,
+//! elevator car and mascots are separate images that the firmware stacks at
+//! the positions given here, in art pixels, and scrolls when the tower is
+//! taller than the screen.
+//!
+//! The positions here must match the art: the tests check that they do.
 
 use herdr_panel_art::{CANVAS_H, CANVAS_W, Grid, HEIGHT, Ink, ORIGIN, WIDTH};
 
-/// Size of the background in art pixels.
+/// Size of the screen in art pixels.
 pub const W: usize = 160;
 pub const H: usize = 240;
 /// Screen pixels per art pixel.
@@ -72,44 +76,6 @@ impl Image {
         self.set(x, y, new);
     }
 
-    /// Fills the rectangle at (`x`, `y`) of size `w` x `h`.
-    fn fill(&mut self, x: i32, y: i32, w: i32, h: i32, c: Rgba) {
-        for yy in y..y + h {
-            for xx in x..x + w {
-                self.set(xx, yy, c);
-            }
-        }
-    }
-
-    /// Fills the rectangle with a one-pixel outline of colour `line`.
-    fn boxed(&mut self, x: i32, y: i32, w: i32, h: i32, c: Rgba, line: Rgba) {
-        self.fill(x, y, w, h, line);
-        self.fill(x + 1, y + 1, w - 2, h - 2, c);
-    }
-
-    /// A vertical gradient from `top` to `bottom` in bands `band` pixels tall.
-    fn gradient(&mut self, x: i32, y: i32, w: i32, h: i32, top: Rgba, bottom: Rgba, band: i32) {
-        for yy in 0..h {
-            let t = (yy / band * band) as f32 / (h - 1).max(1) as f32;
-            self.fill(x, y + yy, w, 1, mix(top, bottom, t));
-        }
-    }
-
-    /// A round glow of colour `c` around (`cx`, `cy`): rings of falling
-    /// opacity, out to radius `r`.
-    fn glow(&mut self, cx: i32, cy: i32, r: i32, c: Rgba, a: f32) {
-        for y in cy - r..=cy + r {
-            for x in cx - r..=cx + r {
-                let d = (((x - cx).pow(2) + (y - cy).pow(2)) as f32).sqrt() / r as f32;
-                if d <= 1.0 {
-                    // Three steps rather than a smooth fade.
-                    let step = (3.0 - (d * 3.0).floor()) / 3.0;
-                    self.blend(x, y, c, a * step);
-                }
-            }
-        }
-    }
-
     /// Draws `other` with its top left corner at (`x`, `y`), blending its
     /// translucent pixels.
     pub fn draw(&mut self, other: &Image, x: i32, y: i32) {
@@ -121,6 +87,17 @@ impl Image {
                 }
             }
         }
+    }
+
+    /// The part of the picture at (`x`, `y`), `w` x `h`.
+    fn crop(&self, x: usize, y: usize, w: usize, h: usize) -> Image {
+        let mut out = Image::new(w, h);
+        for yy in 0..h {
+            for xx in 0..w {
+                out.px[yy * w + xx] = self.get(x + xx, y + yy);
+            }
+        }
+        out
     }
 
     /// The picture with each pixel repeated `sx` times across and `sy` down.
@@ -135,106 +112,33 @@ impl Image {
     }
 }
 
-const fn rgb(hex: u32) -> Rgba {
-    [(hex >> 16) as u8 & 0xf8, (hex >> 8) as u8 & 0xf8, hex as u8 & 0xf8, 0xff]
-}
-
-/// `a` mixed with `b`; `t` = 0 is all `a`.
-fn mix(a: Rgba, b: Rgba, t: f32) -> Rgba {
-    let ch = |i: usize| (a[i] as f32 + (b[i] as f32 - a[i] as f32) * t).round() as u8;
-    snes([ch(0), ch(1), ch(2), 0xff])
-}
-
-/// Three tones of one material.
-#[derive(Clone, Copy)]
-struct Ramp {
-    light: Rgba,
-    base: Rgba,
-    dark: Rgba,
-}
-
-const fn ramp(light: u32, base: u32, dark: u32) -> Ramp {
-    Ramp { light: rgb(light), base: rgb(base), dark: rgb(dark) }
-}
-
-const INK: Rgba = rgb(0x181020);
-const BRICK: Ramp = ramp(0xc06048, 0x983828, 0x602018);
-const STONE: Ramp = ramp(0xe0d8c8, 0xb0a898, 0x787068);
-const WOOD: Ramp = ramp(0xd89860, 0xa86838, 0x704020);
-const METAL: Ramp = ramp(0xe8f0f8, 0xb0b8c8, 0x707888);
-const SHAFT: Ramp = ramp(0x484058, 0x282030, 0x181020);
-const LEAF: Ramp = ramp(0x78d058, 0x389838, 0x186028);
-const NEON: Rgba = rgb(0xff78c0);
-const LAMP: Rgba = rgb(0xfff0a0);
-const WARM: Rgba = rgb(0xffd890);
-const MOON: Rgba = rgb(0xf8f0d0);
-const MOONLIGHT: Rgba = rgb(0x5868b0);
-
-/// The night sky from the top down to the horizon's city glow.
-const SKY: [Rgba; 6] = [rgb(0x100828), rgb(0x201848), rgb(0x382868), rgb(0x583880), rgb(0x904878), rgb(0xd07058)];
-
-/// Wallpaper, one ramp per storey in turn.
-const WALLPAPER: [Ramp; 4] = [
-    ramp(0xf8e8c8, 0xf0d0a8, 0xc8a880),
-    ramp(0xd0f0e0, 0xb0d8c8, 0x88b0a0),
-    ramp(0xe0d0f0, 0xc8b8e0, 0xa090c0),
-    ramp(0xc8e0f8, 0xa8c8e8, 0x80a0c8),
-];
-
-fn hash(a: i32, b: i32) -> u32 {
-    let mut h = (a as u32).wrapping_mul(0x9E37_79B1) ^ (b as u32).wrapping_mul(0x85EB_CA77);
-    h ^= h >> 15;
-    h = h.wrapping_mul(0x2C1B_3C6D);
-    h ^ (h >> 12)
-}
-
-/// The sky's colour at height `y`, in bands three pixels tall.
-fn sky(y: i32) -> Rgba {
-    let t = ((y / 3 * 3) as f32 / GROUND_Y as f32).clamp(0.0, 1.0).powf(1.3) * (SKY.len() - 1) as f32;
-    let i = (t as usize).min(SKY.len() - 2);
-    mix(SKY[i], SKY[i + 1], t - i as f32)
-}
-
-/// A 3x5 pixel font, for storey numbers and the signs.
-fn glyph(c: char) -> [&'static str; 5] {
-    match c {
-        '0' => ["###", "#.#", "#.#", "#.#", "###"],
-        '1' => [".#.", "##.", ".#.", ".#.", "###"],
-        '2' => ["###", "..#", "###", "#..", "###"],
-        '3' => ["###", "..#", ".##", "..#", "###"],
-        '4' => ["#.#", "#.#", "###", "..#", "..#"],
-        '5' => ["###", "#..", "###", "..#", "###"],
-        '6' => ["###", "#..", "###", "#.#", "###"],
-        '7' => ["###", "..#", "..#", ".#.", ".#."],
-        '8' => ["###", "#.#", "###", "#.#", "###"],
-        '9' => ["###", "#.#", "###", "..#", "###"],
-        'H' => ["#.#", "#.#", "###", "#.#", "#.#"],
-        'E' => ["###", "#..", "##.", "#..", "###"],
-        'R' => ["##.", "#.#", "##.", "#.#", "#.#"],
-        'D' => ["##.", "#.#", "#.#", "#.#", "##."],
-        'L' => ["#..", "#..", "#..", "#..", "###"],
-        'O' => ["###", "#.#", "#.#", "#.#", "###"],
-        'B' => ["##.", "#.#", "##.", "#.#", "##."],
-        'Y' => ["#.#", "#.#", ".#.", ".#.", ".#."],
-        _ => ["...", "...", "...", "...", "..."],
+/// Decodes a PNG of any colour type into RGBA, with colours cut to 15 bits.
+/// Panics on a broken file: the assets are part of the source.
+fn load(name: &str, bytes: &[u8]) -> Image {
+    let mut decoder = png::Decoder::new(bytes);
+    decoder.set_transformations(png::Transformations::normalize_to_color8());
+    let mut reader = decoder.read_info().unwrap_or_else(|e| panic!("{name}: {e}"));
+    let mut buf = vec![0; reader.output_buffer_size()];
+    let info = reader.next_frame(&mut buf).unwrap_or_else(|e| panic!("{name}: {e}"));
+    let channels = info.color_type.samples();
+    let mut img = Image::new(info.width as usize, info.height as usize);
+    for (i, px) in buf[..info.buffer_size()].chunks(channels).enumerate() {
+        let c = match px {
+            [r, g, b, a] => [*r, *g, *b, *a],
+            [r, g, b] => [*r, *g, *b, 0xff],
+            [v, a] => [*v, *v, *v, *a],
+            [v] => [*v, *v, *v, 0xff],
+            _ => unreachable!("{name}: {channels} channels"),
+        };
+        img.px[i] = if c[3] == 0 { [0; 4] } else { snes(c) };
     }
+    img
 }
 
-/// Writes `s` in the pixel font, with a drop shadow if `shadow` is given.
-fn text(img: &mut Image, x: i32, y: i32, s: &str, c: Rgba, shadow: Option<Rgba>) {
-    for (i, ch) in s.chars().enumerate() {
-        for (dy, row) in glyph(ch).iter().enumerate() {
-            for (dx, p) in row.chars().enumerate() {
-                if p == '#' {
-                    let (px, py) = (x + i as i32 * 4 + dx as i32, y + dy as i32);
-                    if let Some(s) = shadow {
-                        img.set(px + 1, py + 1, s);
-                    }
-                    img.set(px, py, c);
-                }
-            }
-        }
-    }
+macro_rules! asset {
+    ($name:literal) => {
+        load($name, include_bytes!(concat!("../../assets/", $name)))
+    };
 }
 
 // The tower fills the screen's width and stands on the pavement at GROUND_Y.
@@ -258,10 +162,23 @@ pub const DESKS_PER_STOREY: usize = 6;
 pub const DESKS_X: i32 = ROOMS_X + 1;
 pub const DESK_SPACING: i32 = 22;
 pub const ROOF_H: usize = 14;
-/// How many wallpapers storeys cycle through, one per workspace.
-pub const WALLPAPERS: usize = WALLPAPER.len();
+/// How many wallpapers storeys cycle through, one per workspace: the
+/// `storey-N.png` files.
+pub const WALLPAPERS: usize = 4;
 /// How far the top of the plumbob is above the agent's feet.
 pub const PLUMBOB_ABOVE: i32 = 19;
+/// Size of an [`arrow`] button, and its left edge: over the elevator shaft.
+pub const ARROW_SIZE: usize = 14;
+pub const ARROW_X: i32 = SHAFT_X;
+/// Where the car stops in a storey, relative to the storey.
+pub const CAR_AT: (i32, i32) = (SHAFT_X + 1, 2);
+
+/// What a dark storey's room is multiplied by: moonlight blue.
+const MOONLIGHT: Rgba = [0x58, 0x68, 0xb0, 0xff];
+/// The middle column of `lamp-on.png`, which goes over each lamp fitting.
+const LAMP_CENTRE: i32 = 12;
+/// Where `moonbeam.png` goes, relative to the centre of a window.
+const MOONBEAM_AT: (i32, i32) = (-6, 13);
 
 /// The top of storey `level`, where 0 is the lobby.
 pub fn storey_top(level: usize) -> i32 {
@@ -273,289 +190,77 @@ pub fn roof_top(storeys: usize) -> i32 {
     storey_top(storeys) - ROOF_H as i32 + 1
 }
 
-/// A row of city blocks along the horizon: heights from `seed`, between
-/// `low` and `high` pixels tall.
-fn skyline(img: &mut Image, seed: i32, low: i32, high: i32, body: Rgba, edge: Rgba, windows: &[Rgba], lit: u32) {
-    let mut x = -6;
-    let mut i = 0;
-    while x < W as i32 {
-        let w = 10 + (hash(i, seed) % 14) as i32;
-        let h = low + (hash(i, seed + 1) % (high - low) as u32) as i32;
-        let top = GROUND_Y - h;
-        img.fill(x, top, w, h, body);
-        img.fill(x, top, w, 1, edge);
-        img.fill(x, top, 1, h, edge);
-        // Some blocks get a spire or a stepped top.
-        match hash(i, seed + 2) % 4 {
-            0 => img.fill(x + w / 2, top - 6, 1, 6, edge),
-            1 => {
-                img.fill(x + 2, top - 3, w - 4, 3, body);
-                img.fill(x + 2, top - 3, w - 4, 1, edge);
-            }
-            _ => {}
-        }
-        for wy in (top + 3..GROUND_Y - 3).step_by(4) {
-            for wx in (x + 2..x + w - 2).step_by(3) {
-                if hash(wx, wy + seed) % lit == 0 {
-                    let c = windows[(hash(wy, wx) as usize) % windows.len()];
-                    img.fill(wx, wy, 2, 2, c);
-                }
-            }
-        }
-        x += w;
-        i += 1;
-    }
-}
-
 /// What stays still behind the tower: the night sky, the moon, and the city
 /// along the horizon, which shows above the roof of a short tower.
 pub fn backdrop() -> Image {
-    let mut img = Image::new(W, H);
-    for y in 0..H as i32 {
-        img.fill(0, y, W as i32, 1, sky(y));
-    }
-    // Stars: a few bright ones with crosses, many faint.
-    for y in 0..GROUND_Y - 70 {
-        for x in 0..W as i32 {
-            match hash(x, y) % 260 {
-                0 => img.set(x, y, rgb(0xf8f8f8)),
-                1 | 2 => img.blend(x, y, rgb(0xc0c8f8), 0.6),
-                _ => {}
-            }
-        }
-    }
-    for (sx, sy) in [(16, 46), (98, 30), (60, 70)] {
-        img.set(sx, sy, rgb(0xffffff));
-        for (dx, dy) in [(1, 0), (-1, 0), (0, 1), (0, -1)] {
-            img.blend(sx + dx, sy + dy, rgb(0xc0c8f8), 0.7);
-        }
-    }
-    // The moon: a halo, then the disc with a shaded edge and craters.
-    img.glow(140, 30, 16, MOON, 0.18);
-    for y in -7..=7 {
-        for x in -7..=7 {
-            let d = x * x + y * y;
-            if d <= 49 {
-                let c = if d > 36 && x + y > 0 {
-                    rgb(0xd0c8a8)
-                } else if x + y < -6 {
-                    rgb(0xffffff)
-                } else {
-                    MOON
-                };
-                img.set(140 + x, 30 + y, c);
-            }
-        }
-    }
-    for (x, y) in [(138, 28), (143, 32), (139, 34)] {
-        img.set(x, y, rgb(0xd8d0b0));
-    }
-    // Two layers of city: far and hazy, then near and dark with lit windows.
-    skyline(&mut img, 11, 50, 110, rgb(0x483878), rgb(0x584888), &[rgb(0x9878a0)], 9);
-    for y in GROUND_Y - 40..H as i32 {
-        let t = ((y - (GROUND_Y - 40)) as f32 / 40.0).min(1.0);
-        for x in 0..W as i32 {
-            img.blend(x, y, SKY[5], 0.25 * t);
-        }
-    }
-    skyline(&mut img, 3, 24, 70, rgb(0x201838), rgb(0x302850), &[rgb(0xf8c060), rgb(0xf8e0a0), rgb(0x6888f8)], 4);
-    img
+    asset!("backdrop.png")
 }
-
-/// Where the lobby's doors are, from the left edge.
-const DOOR_X: i32 = 118;
 
 /// The street in front of the tower, from GROUND_Y to the bottom of the
-/// screen: pavement lit by the lobby's doors, kerb, asphalt with a dashed line.
+/// screen.
 pub fn street() -> Image {
-    let h = H as i32 - GROUND_Y;
-    let mut img = Image::new(W, h as usize);
-    img.fill(0, 0, W as i32, 1, STONE.light);
-    img.gradient(0, 1, W as i32, 4, STONE.base, STONE.dark, 1);
-    for x in (0..W as i32).step_by(8) {
-        img.fill(x, 1, 1, 4, STONE.dark);
-    }
-    for y in 0..5 {
-        for x in DOOR_X - 2..DOOR_X + 30 {
-            img.blend(x, y, WARM, 0.25);
-        }
-    }
-    img.fill(0, 5, W as i32, 1, rgb(0x383040));
-    img.gradient(0, 6, W as i32, h - 6, rgb(0x403850), rgb(0x282030), 2);
-    for x in (2..W as i32).step_by(14) {
-        img.fill(x, 11, 7, 1, rgb(0xf8d048));
-        img.fill(x, 12, 7, 1, rgb(0xb89030));
-    }
-    img
+    asset!("street.png")
 }
 
-/// Brick wall texture at (`x`, `y`), `w` x `h`: each brick lit on top.
-fn bricks(img: &mut Image, x: i32, y: i32, w: i32, h: i32) {
-    for yy in y..y + h {
-        for xx in x..x + w {
-            let row = yy.div_euclid(3);
-            let c = if yy.rem_euclid(3) == 2 || (xx + row * 3).rem_euclid(6) == 0 {
-                BRICK.dark
-            } else if yy.rem_euclid(3) == 0 {
-                BRICK.light
-            } else {
-                BRICK.base
-            };
-            img.set(xx, yy, c);
-        }
-    }
-}
-
-/// A storey's walls, shaft and slab, with the room in `paper`.
-fn shell(paper: Ramp) -> Image {
-    let mut img = Image::new(W, STOREY_H);
-    let h = STOREY_H as i32;
-    let inner = h - SLAB;
-    let rooms_w = ROOMS_END - ROOMS_X;
-    // Room: wallpaper with a shadow under the ceiling and a darker dado.
-    img.fill(ROOMS_X, 0, rooms_w, inner, paper.base);
-    img.fill(ROOMS_X, 0, rooms_w, 2, paper.dark);
-    img.fill(ROOMS_X, inner - 7, rooms_w, 7, paper.dark);
-    img.fill(ROOMS_X, inner - 7, rooms_w, 1, paper.light);
-    // Outer walls, with a dark line along the outside.
-    bricks(&mut img, 0, 0, WALL, h);
-    bricks(&mut img, ROOMS_END, 0, WALL, h);
-    img.fill(0, 0, 1, h, INK);
-    img.fill(W as i32 - 1, 0, 1, h, INK);
-    // The shaft: dark with lit rails and a cable.
-    img.gradient(SHAFT_X, 0, SHAFT_W, inner, SHAFT.base, SHAFT.dark, 2);
-    for rail in [SHAFT_X + 1, SHAFT_X + SHAFT_W - 2] {
-        img.fill(rail, 0, 1, inner, SHAFT.light);
-    }
-    img.fill(SHAFT_X + SHAFT_W / 2, 0, 1, inner, rgb(0x383040));
-    img.fill(ROOMS_X - 1, 0, 1, inner, INK);
-    // Floor: wooden boards on a concrete slab.
-    img.fill(ROOMS_X - 1, inner, rooms_w + 1, 1, WOOD.light);
-    img.fill(WALL, inner + 1, W as i32 - 2 * WALL, 1, STONE.base);
-    img.fill(WALL, inner + 2, W as i32 - 2 * WALL, 1, STONE.dark);
-    img.fill(SHAFT_X, inner, SHAFT_W, 1, STONE.light);
-    img
-}
-
-/// The lobby: reception, a plant, and glass doors under a striped awning.
+/// The lobby, storey 0.
 pub fn lobby() -> Image {
-    let mut img = shell(ramp(0xf0e8d8, 0xd8d0c0, 0xb0a898));
-    let inner = STOREY_H as i32 - SLAB;
-    // Marble floor tiles in two tones.
-    for x in ROOMS_X..ROOMS_END {
-        let c = if (x / 4) % 2 == 0 { rgb(0xf8f0e8) } else { rgb(0xc8c0b8) };
-        img.set(x, inner, c);
-    }
-    text(&mut img, ROOMS_X + 3, 4, "LOBBY", rgb(0xb08840), Some(rgb(0x806020)));
-    img.boxed(34, 12, 26, 9, WOOD.base, INK);
-    img.fill(35, 13, 24, 1, WOOD.light);
-    img.fill(35, 19, 24, 1, WOOD.dark);
-    for (px, py) in [(70, 6), (98, 6)] {
-        img.boxed(px + 3, py + 9, 6, 6, BRICK.base, INK);
-        img.fill(px + 4, py + 10, 4, 1, BRICK.light);
-        img.boxed(px, py, 12, 10, LEAF.base, INK);
-        img.fill(px + 2, py + 2, 4, 2, LEAF.light);
-        img.fill(px + 6, py + 6, 4, 3, LEAF.dark);
-    }
-    img.boxed(DOOR_X, 6, 28, inner - 6, METAL.dark, INK);
-    for dx in [2, 15] {
-        img.boxed(DOOR_X + dx, 8, 11, inner - 8, rgb(0x78b8e8), INK);
-        img.gradient(DOOR_X + dx + 1, 9, 9, inner - 10, rgb(0xa8d8f8), rgb(0x5890c8), 2);
-        for i in 0..4 {
-            img.set(DOOR_X + dx + 2 + i, 13 - i, rgb(0xe0f0f8));
-        }
-    }
-    for dx in 0..32 {
-        let stripe =
-            if (dx / 4) % 2 == 0 { ramp(0xf87068, 0xd83838, 0x902020) } else { ramp(0xffffff, 0xf0e8e0, 0xc0b8b0) };
-        img.set(DOOR_X - 2 + dx, 2, stripe.light);
-        img.set(DOOR_X - 2 + dx, 3, stripe.base);
-        img.set(DOOR_X - 2 + dx, 4, stripe.dark);
-    }
-    img.fill(DOOR_X - 2, 5, 32, 1, INK);
-    lamps(&mut img, true, &[48, 86]);
-    img
+    asset!("lobby.png")
 }
 
-/// Ceiling lamps at `xs` in a storey; lit ones throw a cone of warm light
-/// down to the floor.
-fn lamps(img: &mut Image, lit: bool, xs: &[i32]) {
-    let inner = STOREY_H as i32 - SLAB;
-    for &cx in xs {
-        img.fill(cx, 0, 1, 1, INK);
-        img.fill(cx - 2, 1, 5, 1, INK);
-        img.fill(cx - 1, 2, 3, 1, if lit { LAMP } else { rgb(0x605868) });
-        if lit {
-            for y in 3..inner {
-                let half = 2 + y / 2;
-                for x in cx - half..=cx + half {
-                    img.blend(x, y, WARM, 0.16);
-                }
-            }
-        }
+fn room(paper: usize) -> Image {
+    match paper % WALLPAPERS {
+        0 => asset!("storey-0.png"),
+        1 => asset!("storey-1.png"),
+        2 => asset!("storey-2.png"),
+        _ => asset!("storey-3.png"),
     }
+}
+
+fn desk_centre(i: usize) -> i32 {
+    DESKS_X + DESK_SPACING * i as i32 + DESK_SPACING / 2
+}
+
+/// The lamp fittings, between the desks.
+fn lamp_xs() -> impl Iterator<Item = i32> {
+    (0..DESKS_PER_STOREY - 1).map(|i| desk_centre(i) + DESK_SPACING / 2)
 }
 
 /// A storey of offices in wallpaper `paper` (counted modulo
-/// [`WALLPAPERS`]), with its desks, and its lights on if `lit`. Agents are
-/// drawn over it with [`behind_desk`]; the storey's number goes on with
-/// [`digits`].
+/// [`WALLPAPERS`]), with its desks, and its lamps on if `lit`; otherwise the
+/// room is tinted by moonlight falling through the windows. Agents are drawn
+/// over it with [`behind_desk`]; the storey's number goes on with [`digits`].
 pub fn storey(paper: usize, lit: bool) -> Image {
-    let paper = paper % WALLPAPERS;
-    let ramp = WALLPAPER[paper];
-    let mut img = shell(ramp);
-    let inner = STOREY_H as i32 - SLAB;
+    let mut img = room(paper);
+    let desk = desk();
     for i in 0..DESKS_PER_STOREY {
-        let cx = desk_centre(i);
-        // A window behind each desk, showing the sky, with a white frame.
-        img.boxed(cx - 7, 3, 14, 10, rgb(0xf8f0e8), INK);
-        for wy in 4..12 {
-            img.fill(cx - 6, wy, 12, 1, sky(wy * 8 + paper as i32 * 4 + i as i32 * 6));
-        }
-        img.fill(cx, 4, 1, 8, rgb(0xd0c8c0));
-        img.fill(cx - 6, 8, 12, 1, rgb(0xd0c8c0));
-        img.fill(cx - 7, 12, 14, 1, ramp.dark);
-        if hash(paper as i32, i as i32) % 3 == 0 {
-            img.set(cx - 4, 5, rgb(0xf8f8f8));
-        }
-        img.set(cx + 3, 9, rgb(0x9888b8));
         let (dx, dy) = desk_at(i);
-        img.draw(&desk(), dx, dy);
+        img.draw(&desk, dx, dy);
     }
-    let lamp_xs: Vec<i32> = (0..DESKS_PER_STOREY - 1).map(|i| desk_centre(i) + DESK_SPACING / 2).collect();
     if lit {
-        lamps(&mut img, true, &lamp_xs);
+        let lamp = asset!("lamp-on.png");
+        for x in lamp_xs() {
+            img.draw(&lamp, x - LAMP_CENTRE, 0);
+        }
     } else {
-        // Lights out: the room tinted by moonlight, the lamps dark.
-        for y in 0..inner + 1 {
+        for y in 0..STOREY_H as i32 - SLAB + 1 {
             for x in ROOMS_X..ROOMS_END {
                 let c = img.get(x as usize, y as usize);
                 let tint = |i: usize| (c[i] as u32 * MOONLIGHT[i] as u32 / 255) as u8;
                 img.set(x, y, [tint(0), tint(1), tint(2), 0xff]);
             }
         }
-        lamps(&mut img, false, &lamp_xs);
-        // Moonlight falling through each window onto the floor.
+        let beam = asset!("moonbeam.png");
         for i in 0..DESKS_PER_STOREY {
-            let cx = desk_centre(i);
-            for y in 13..inner {
-                let shift = (y - 13) / 2;
-                for x in cx - 6 + shift..cx + 6 + shift {
-                    img.blend(x, y, rgb(0xa0b0f8), 0.12);
-                }
-            }
+            img.draw(&beam, desk_centre(i) + MOONBEAM_AT.0, MOONBEAM_AT.1);
         }
     }
     img
 }
 
-/// The digits 0 to 9 for storey numbers, with a drop shadow.
+/// The digits 0 to 9 for storey numbers, cut from `digits.png`.
 pub fn digits() -> [Image; 10] {
-    core::array::from_fn(|d| {
-        let mut img = Image::new(4, 6);
-        text(&mut img, 0, 0, &d.to_string(), rgb(0xf8b040), Some(rgb(0x582810)));
-        img
-    })
+    let sheet = asset!("digits.png");
+    core::array::from_fn(|d| sheet.crop(4 * d, 0, 4, sheet.h))
 }
 
 /// Where the first of a storey number's `len` digits goes, relative to the
@@ -564,91 +269,26 @@ pub fn number_at(len: usize) -> (i32, i32) {
     (SHAFT_X + SHAFT_W / 2 - 2 * len as i32 + 1, 2)
 }
 
-/// The roof over the top storey: a parapet, a water tank, a glowing "HERDR"
-/// sign and an antenna whose light is on in frame 0 and off in frame 1. Its
-/// top goes at [`roof_top`].
+/// The roof over the top storey, its antenna light on in frame 0 and off in
+/// frame 1. Its top goes at [`roof_top`].
 pub fn roof() -> [Image; 2] {
-    let w = W as i32;
-    let h = ROOF_H as i32;
-    let sign = 68;
-    let frame = |light: bool| {
-        let mut img = Image::new(W, ROOF_H);
-        // Neon glow first, so the sign and its frame sit on it.
-        for y in 0..h - 3 {
-            for x in sign - 3..sign + 26 {
-                img.blend(x, y, NEON, 0.12);
-            }
-        }
-        img.boxed(0, h - 4, w, 4, STONE.base, INK);
-        img.fill(1, h - 3, w - 2, 1, STONE.light);
-        // Water tank on legs: wooden staves with metal bands.
-        img.boxed(9, h - 13, 13, 8, WOOD.base, INK);
-        img.fill(10, h - 12, 3, 6, WOOD.light);
-        img.fill(18, h - 12, 3, 6, WOOD.dark);
-        img.fill(10, h - 10, 11, 1, METAL.dark);
-        img.fill(10, h - 7, 11, 1, METAL.dark);
-        img.fill(11, h - 5, 1, 1, INK);
-        img.fill(19, h - 5, 1, 1, INK);
-        // The sign on its frame.
-        img.fill(sign + 5, h - 5, 1, 1, INK);
-        img.fill(sign + 19, h - 5, 1, 1, INK);
-        img.boxed(sign, h - 13, 23, 8, rgb(0x281828), INK);
-        text(&mut img, sign + 2, h - 11, "HERDR", NEON, None);
-        // Antenna, with its light glowing when on.
-        img.fill(w - 16, 2, 1, h - 6, METAL.base);
-        img.fill(w - 18, 6, 5, 1, METAL.base);
-        if light {
-            img.glow(w - 16, 1, 3, rgb(0xff4040), 0.35);
-        }
-        img.fill(w - 17, 0, 3, 2, if light { rgb(0xff4040) } else { rgb(0x702020) });
-        img
-    };
-    [frame(true), frame(false)]
+    [asset!("roof-on.png"), asset!("roof-off.png")]
 }
 
-/// Size of an [`arrow`] button, and its left edge: over the elevator shaft.
-pub const ARROW_SIZE: usize = 14;
-pub const ARROW_X: i32 = SHAFT_X;
-
-/// A metal button with a glowing arrow, pointing up if `up`, for scrolling
-/// the tower a storey at a time. Its corners are cut round.
-pub fn arrow(up: bool) -> Image {
-    let n = ARROW_SIZE as i32;
-    let mut img = Image::new(ARROW_SIZE, ARROW_SIZE);
-    img.boxed(0, 0, n, n, METAL.base, INK);
-    img.fill(1, 1, n - 2, 1, METAL.light);
-    img.fill(1, 1, 1, n - 2, METAL.light);
-    img.fill(1, n - 2, n - 2, 1, METAL.dark);
-    img.fill(n - 2, 1, 1, n - 2, METAL.dark);
-    for (x, y) in [(0, 0), (n - 1, 0), (0, n - 1), (n - 1, n - 1)] {
-        img.px[(y * n + x) as usize] = [0; 4];
-    }
-    for r in 0..5 {
-        let y = if up { 4 + r } else { n - 5 - r };
-        img.fill(n / 2 - 1 - r, y, 2 + 2 * r, 1, if r == 4 { rgb(0xc07818) } else { rgb(0xf8b040) });
-    }
-    img
-}
-
-/// The elevator car, with its doors shut and its indicator lit.
+/// The elevator car.
 pub fn car() -> Image {
-    let (w, h) = (SHAFT_W - 2, STOREY_H as i32 - SLAB - 2);
-    let mut img = Image::new(w as usize, h as usize);
-    img.boxed(0, 0, w, h, METAL.base, INK);
-    img.fill(1, 1, w - 2, 2, METAL.dark);
-    img.fill(w / 2 - 1, 1, 2, 1, rgb(0xf8b040));
-    img.gradient(2, 4, w - 4, h - 5, METAL.light, METAL.dark, 2);
-    img.fill(w / 2, 4, 1, h - 5, INK);
-    img.fill(3, 5, 1, 5, rgb(0xffffff));
-    img.fill(w / 2 + 2, 5, 1, 3, rgb(0xffffff));
-    img
+    asset!("car.png")
 }
 
-/// Where the car stops in a storey, relative to the storey.
-pub const CAR_AT: (i32, i32) = (SHAFT_X + 1, 2);
+/// The button that scrolls up a storey if `up`, else down.
+pub fn arrow(up: bool) -> Image {
+    if up { asset!("arrow-up.png") } else { asset!("arrow-down.png") }
+}
 
-fn desk_centre(i: usize) -> i32 {
-    DESKS_X + DESK_SPACING * i as i32 + DESK_SPACING / 2
+/// The marker over the focused agent. Its top goes [`PLUMBOB_ABOVE`] over
+/// the agent's feet.
+pub fn plumbob() -> Image {
+    asset!("plumbob.png")
 }
 
 const DESK_W: i32 = 22;
@@ -659,23 +299,8 @@ const AGENT_LEFT: i32 = 2;
 /// How far above the floor its feet are, as if on a tall stool.
 const AGENT_UP: i32 = 2;
 
-/// A desk seen from the front, with a monitor at its right end seen from
-/// behind, its screen's glow spilling round the edges.
 fn desk() -> Image {
-    let mut img = Image::new(DESK_W as usize, (DESK_H + LID_H) as usize);
-    for y in 0..LID_H {
-        for x in DESK_W - 9..DESK_W {
-            img.blend(x, y, rgb(0x88c8ff), 0.3);
-        }
-    }
-    img.boxed(DESK_W - 7, 0, 6, LID_H - 1, METAL.base, INK);
-    img.fill(DESK_W - 6, 1, 4, 1, METAL.light);
-    img.fill(DESK_W - 5, LID_H - 1, 2, 1, INK);
-    img.boxed(0, LID_H, DESK_W, DESK_H, WOOD.base, INK);
-    img.fill(1, LID_H + 1, DESK_W - 2, 1, WOOD.light);
-    img.fill(1, LID_H + 2, DESK_W - 2, 1, WOOD.base);
-    img.fill(4, LID_H + 2, 5, 1, WOOD.dark);
-    img
+    asset!("desk.png")
 }
 
 /// Where desk `i`'s top left corner is, relative to the storey.
@@ -701,6 +326,9 @@ pub fn slot(i: usize) -> Slot {
     let feet = (desk_centre(i) - AGENT_LEFT, STOREY_H as i32 - SLAB - AGENT_UP);
     Slot { feet, mascot: (feet.0 - MASCOT_FEET.0, feet.1 - MASCOT_FEET.1) }
 }
+
+/// The mascot's outline and eyes.
+const OUTLINE: Rgba = [0x40, 0x18, 0x18, 0xff];
 
 /// The mascot frame `grid`, keeping the terminal's shape: each pixel one
 /// wide and two tall, like a character cell, in flat colours picked by
@@ -731,7 +359,7 @@ pub fn mascot(grid: &Grid, color: impl Fn(Ink) -> Rgba) -> Image {
 }
 
 /// `mascot` with the pixels its desk hides cut away, so that drawn over a
-/// [`storey`] at a [`Slot`] it stands behind the desk baked into the storey.
+/// [`storey`] at a [`Slot`] it stands behind the desk drawn into the storey.
 pub fn behind_desk(mascot: &Image) -> Image {
     let (s, d) = (slot(0), desk_at(0));
     let desk = desk();
@@ -747,32 +375,6 @@ pub fn behind_desk(mascot: &Image) -> Image {
     out
 }
 
-/// The mascot's outline and eyes.
-const OUTLINE: Rgba = rgb(0x401818);
-
-/// The marker over the focused agent: a green crystal, lit from the left,
-/// with a faint glow. Its top goes [`PLUMBOB_ABOVE`] over the agent's feet.
-pub fn plumbob() -> Image {
-    const ROWS: [&str; 7] = ["..#..", ".#L#.", ".LG#.", "#LGD#", ".GD#.", ".#D#.", "..#.."];
-    let mut img = Image::new(5, ROWS.len());
-    for (y, row) in ROWS.iter().enumerate() {
-        for (x, c) in row.chars().enumerate() {
-            let color = match c {
-                '#' => rgb(0x084018),
-                'L' => rgb(0xb8ffa8),
-                'G' => rgb(0x48d848),
-                'D' => rgb(0x209030),
-                _ => {
-                    img.blend(x as i32, y as i32, rgb(0x80ff80), 0.2);
-                    continue;
-                }
-            };
-            img.set(x as i32, y as i32, color);
-        }
-    }
-    img
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -780,16 +382,62 @@ mod tests {
 
     const BODY: Rgba = [0xd8, 0x78, 0x58, 0xff];
 
+    fn size(img: &Image) -> (usize, usize) {
+        (img.w, img.h)
+    }
+
     #[test]
-    fn backdrop_and_street_fill_the_screen_and_are_opaque() {
-        let b = backdrop();
-        assert_eq!((b.w * SCALE, b.h * SCALE), (320, 480));
-        let s = street();
-        assert_eq!(s.h as i32, H as i32 - GROUND_Y);
-        for img in [b, s, lobby(), storey(0, true), storey(1, false)] {
-            assert_eq!(img.w, W);
-            assert!(img.px.iter().all(|p| p[3] == 0xff));
+    fn assets_have_the_sizes_the_layout_expects() {
+        assert_eq!(size(&backdrop()), (W, H));
+        assert_eq!(size(&street()), (W, H - GROUND_Y as usize));
+        assert_eq!(size(&lobby()), (W, STOREY_H));
+        for p in 0..WALLPAPERS {
+            assert_eq!(size(&room(p)), (W, STOREY_H), "storey-{p}.png");
         }
+        assert_eq!(size(&desk()), (DESK_W as usize, (DESK_H + LID_H) as usize));
+        for r in roof() {
+            assert_eq!(size(&r), (W, ROOF_H));
+        }
+        for up in [true, false] {
+            assert_eq!(size(&arrow(up)), (ARROW_SIZE, ARROW_SIZE));
+        }
+        assert_eq!(size(&asset!("digits.png")), (40, 6));
+        assert_eq!(asset!("lamp-on.png").w as i32, 2 * LAMP_CENTRE + 1);
+    }
+
+    #[test]
+    fn backgrounds_are_opaque() {
+        for (name, img) in [("backdrop", backdrop()), ("street", street()), ("lobby", lobby())] {
+            assert!(img.px.iter().all(|p| p[3] == 0xff), "{name}");
+        }
+        for p in 0..WALLPAPERS {
+            for lit in [true, false] {
+                assert!(storey(p, lit).px.iter().all(|p| p[3] == 0xff), "storey {p} lit {lit}");
+            }
+        }
+    }
+
+    #[test]
+    fn colours_are_cut_to_15_bits() {
+        let mut img = load("test", &{
+            let mut out = Vec::new();
+            let mut enc = png::Encoder::new(&mut out, 1, 1);
+            enc.set_color(png::ColorType::Rgb);
+            enc.write_header().unwrap().write_image_data(&[0xff, 0x7f, 0x01]).unwrap();
+            out
+        });
+        assert_eq!(img.px[0], [0xf8, 0x78, 0x00, 0xff]);
+        img.blend(0, 0, [0x13, 0x13, 0x13, 0xff], 0.5);
+        assert!(img.px[0][..3].iter().all(|c| c & 7 == 0));
+    }
+
+    #[test]
+    fn uses_many_colours_but_not_too_many() {
+        // A 16-bit look: well beyond the NES's handful, within a SNES screen's 256.
+        let mut colours: Vec<Rgba> = backdrop().px;
+        colours.sort();
+        colours.dedup();
+        assert!((40..=256).contains(&colours.len()), "{} colours", colours.len());
     }
 
     #[test]
@@ -806,8 +454,7 @@ mod tests {
         for i in 0..DESKS_PER_STOREY {
             let (x, _) = desk_at(i);
             assert!(x >= ROOMS_X && x + DESK_W <= ROOMS_END, "desk {i} at {x}");
-            let centre = desk_centre(i);
-            assert_eq!(((centre - DESKS_X) / DESK_SPACING) as usize, i);
+            assert_eq!(((desk_centre(i) - DESKS_X) / DESK_SPACING) as usize, i);
         }
     }
 
@@ -866,13 +513,13 @@ mod tests {
 
     #[test]
     fn agent_behind_desk_looks_like_agent_then_desk() {
-        // The board draws the cut mascot over a storey with the desk baked
+        // The board draws the cut mascot over a storey with the desk drawn
         // in; that must match drawing the mascot and then the desk on top,
         // except under the desk's translucent glow.
         let m = mascot(&frame(Behavior::Work, 0, 1), |_| BODY);
         let s = slot(2);
         let (dx, dy) = desk_at(2);
-        let mut room = shell(WALLPAPER[0]);
+        let mut room = room(0);
         let mut expected = room.clone();
         expected.draw(&m, s.mascot.0, s.mascot.1);
         expected.draw(&desk(), dx, dy);
@@ -888,25 +535,6 @@ mod tests {
                 }
             }
         }
-    }
-
-    #[test]
-    fn every_colour_fits_the_snes_15_bits() {
-        let [on, off] = roof();
-        let m = mascot(&frame(Behavior::Work, 0, 0), |_| [0xd9, 0x77, 0x57, 0xff]);
-        let [d0, ..] = digits();
-        for img in [backdrop(), street(), lobby(), storey(1, true), storey(3, false), on, off, car(), plumbob(), m, d0] {
-            assert!(img.px.iter().all(|p| p[0] & 7 == 0 && p[1] & 7 == 0 && p[2] & 7 == 0));
-        }
-    }
-
-    #[test]
-    fn uses_many_colours_but_not_too_many() {
-        // A 16-bit look: well beyond the NES's handful, within a SNES screen's 256.
-        let mut colours: Vec<Rgba> = backdrop().px;
-        colours.sort();
-        colours.dedup();
-        assert!((40..=256).contains(&colours.len()), "{} colours", colours.len());
     }
 
     #[test]
@@ -941,22 +569,10 @@ mod tests {
     }
 
     #[test]
-    fn arrows_point_up_and_down() {
-        let (up, down) = (arrow(true), arrow(false));
-        let lit_row = |img: &Image, y: usize| (0..img.w).filter(|&x| img.get(x, y) == rgb(0xf8b040)).count();
-        // The arrow is narrow at its tip: near the top for up, the bottom for down.
-        assert!(lit_row(&up, 4) < lit_row(&up, 7));
-        assert!(lit_row(&down, ARROW_SIZE - 5) < lit_row(&down, ARROW_SIZE - 8));
-        for img in [up, down] {
-            assert!(img.px.iter().all(|p| p[0] & 7 == 0 && p[1] & 7 == 0 && p[2] & 7 == 0));
-        }
-    }
-
-    #[test]
-    fn translucent_glows_blend_into_what_is_below() {
+    fn translucent_pixels_blend_into_what_is_below() {
         let mut img = Image::new(1, 1);
-        img.set(0, 0, rgb(0x000000));
-        img.blend(0, 0, rgb(0xf8f8f8), 0.5);
+        img.set(0, 0, [0, 0, 0, 0xff]);
+        img.blend(0, 0, [0xf8, 0xf8, 0xf8, 0xff], 0.5);
         let p = img.get(0, 0);
         assert!(p[0] > 0x60 && p[0] < 0x90 && p[3] == 0xff, "{p:?}");
     }
@@ -973,3 +589,4 @@ mod tests {
         }
     }
 }
+
