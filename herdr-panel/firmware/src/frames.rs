@@ -1,4 +1,5 @@
-//! The mascot's animation frames, converted from the art crate at build time.
+//! The images and desk positions, converted from the art and scene crates at
+//! build time. Positions are in screen pixels.
 
 use alloc::boxed::Box;
 
@@ -10,6 +11,16 @@ pub struct Loop {
     pub frames: &'static [*const core::ffi::c_void],
     /// Time for all frames, in milliseconds.
     pub duration_ms: u32,
+}
+
+/// Where one agent works.
+pub struct Slot {
+    /// The point between the agent's feet.
+    pub feet: (i32, i32),
+    /// Where the mascot image's top left corner goes.
+    pub mascot: (i32, i32),
+    /// Where the desk image's top left corner goes.
+    pub desk: (i32, i32),
 }
 
 include!(concat!(env!("OUT_DIR"), "/frames.rs"));

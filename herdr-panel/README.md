@@ -1,9 +1,11 @@
 # herdr-panel
 
 A small touch display (Freenove FNK0104N, ESP32-S3, 3.5" 320x480) that shows
-each herdr agent as the Claude Code mascot, animated by what the agent is
-doing. Tapping a mascot focuses that agent in herdr. The board talks to a
-bridge on the laptop over USB serial.
+herdr as a tower in the style of SimTower and 8-bit console games: one
+storey per workspace, and each agent as the Claude Code mascot at a desk,
+animated by what the agent is doing. The elevator rides to the focused agent.
+Tapping a mascot focuses that agent in herdr. The board talks to a bridge on
+the laptop over USB serial.
 
 ```
 herdr  <--Unix socket-->  bridge (laptop)  <--USB serial-->  firmware (board)
@@ -18,14 +20,24 @@ All Rust.
   laptop. The mascot is the block-character art `▐▛███▜▌ / ▝▜█████▛▘ / ▘▘ ▝▝`
   turned into pixels (the two gaps in the top row are the eyes). One looping
   animation per state, plus a random "play" mood that is written but not used yet.
+- `scene/`: the tower, drawn on the laptop at half the screen's resolution
+  and shown at twice the size, in a 16-colour palette (PICO-8's) with
+  dithered shading and black outlines: night sky, skyline, street, lobby,
+  storeys (lights off when every agent there is idle), roof, elevator, desks,
+  and the mascot sprites. `cargo run -p herdr-panel-scene --example preview --
+  out.png 2,1,3` draws the screen with three storeys of two, one and three
+  agents.
 - `bridge/`: reads `agent.list` and `workspace.list` from herdr's socket
   (`$HERDR_SOCKET_PATH`), pushes the agents to the board when they change, and
   runs `agent.focus` when the board asks. It subscribes to herdr's change events
   and also polls every 2 s in case one is missed.
-- `firmware/`: esp-hal and oxivgl. One mascot per agent, in a grid centred on
-  the screen. `build.rs` renders every animation frame from `art/` to a PNG,
-  converts it with LVGL's `LVGLImage.py` into a native ARGB8888 image and
-  compiles it in; each mascot is an LVGL animated image looping its frames.
+- `firmware/`: esp-hal and oxivgl. The sky, street and lobby are one
+  full-screen RGB565 image; storeys are stacked on it, one per workspace (the
+  pane id's part before `:`), at most 7 with 4 desks each. Each agent is a
+  mascot looping its frames with its desk drawn over it; a green plumbob bobs
+  over the focused one and the elevator car slides to its storey.
+  `build.rs` renders the images from `scene/` and `art/` to PNGs, converts
+  them with LVGL's `LVGLImage.py` and compiles them in.
   Separate from the workspace because it needs the Xtensa toolchain
   (`cargo +esp`).
 
@@ -39,8 +51,7 @@ All Rust.
 | done | hopping, arms up, sparkles |
 | unknown | a "?" above it |
 
-Each mascot pixel is drawn 1 pixel wide and 2 tall, so the mascot is 18x12 on
-screen (about 3 mm wide), like a character cell in the terminal it comes from.
+The "z", "!", "?" and sparkles stay flat, next to the mascot's head.
 
 ## Messages
 

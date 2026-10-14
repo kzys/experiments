@@ -27,6 +27,7 @@ static_cell = { version = "2", features = ["nightly"] }
 [build-dependencies]
 cc = "1"
 herdr-panel-art = { path = "../art" }
+herdr-panel-scene = { path = "../scene" }
 oxivgl-build = "0.1.2"
 png = "0.17"
 
