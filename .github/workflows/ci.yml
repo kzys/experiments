@@ -1,0 +1,36 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  projects:
+    runs-on: ubuntu-latest
+    outputs:
+      list: ${{ steps.find.outputs.list }}
+    steps:
+      - uses: actions/checkout@v4
+      # Every top-level directory with a Makefile is a project.
+      - id: find
+        run: |
+          list=$(find . -mindepth 2 -maxdepth 2 -name Makefile -printf '%h\n' \
+                 | sed 's|^\./||' | sort | jq -R . | jq -sc .)
+          echo "list=$list" >> "$GITHUB_OUTPUT"
+
+  build:
+    needs: projects
+    if: needs.projects.outputs.list != '[]'
+    strategy:
+      fail-fast: false
+      matrix:
+        project: ${{ fromJSON(needs.projects.outputs.list) }}
+    name: ${{ matrix.project }}
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: ${{ matrix.project }}
+    steps:
+      - uses: actions/checkout@v4
+      - run: make
