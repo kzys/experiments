@@ -15,7 +15,6 @@
 
 use alloc::vec::Vec;
 use embassy_time::Instant;
-use herdr_panel_art::Behavior;
 use herdr_panel_protocol::{Id, State, Status, ToHost, storeys};
 use oxivgl::{
     anim::{ANIM_REPEAT_INFINITE, Anim, anim_path_ease_in_out, anim_set_y},
@@ -50,16 +49,6 @@ const MANUAL_SCROLL_HOLD_SECS: u64 = 10;
 const ARROW_UP_Y: i32 = 8;
 const ARROW_DOWN_Y: i32 = SCREEN_H - 36;
 const ARROW_REACH: i32 = 10;
-
-fn behavior(status: Status) -> Behavior {
-    match status {
-        Status::Working => Behavior::Work,
-        Status::Idle => Behavior::Sleep,
-        Status::Blocked => Behavior::Blocked,
-        Status::Done => Behavior::Done,
-        Status::Unknown => Behavior::Unknown,
-    }
-}
 
 /// The top of storey `level` (0 is the lobby) with the view at the bottom.
 fn storey_top(level: usize) -> i32 {
@@ -96,7 +85,7 @@ pub struct Panel {
     /// The level the car is at or heading for.
     car_level: usize,
     rendered: Rendered,
-    loops: Vec<(Behavior, Loop)>,
+    loops: Vec<(Status, Loop)>,
     plumbob: Option<Loop>,
     roof: Option<Loop>,
     /// How far the content is shifted down so that it starts at 0: what
@@ -190,7 +179,7 @@ impl Panel {
         for (k, storey) in storeys.iter().enumerate() {
             let top = at(storey_top(k + 1));
             for (agent, slot) in storey.agents.iter().zip(&SLOTS) {
-                if let Some((_, l)) = self.loops.iter().find(|(b, _)| *b == behavior(agent.status)) {
+                if let Some((_, l)) = self.loops.iter().find(|(s, _)| *s == agent.status) {
                     r.sprites.push(self.looping(scroller, l, slot.mascot.0, top + slot.mascot.1)?);
                 }
                 if agent.focused

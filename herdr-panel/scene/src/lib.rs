@@ -1,14 +1,15 @@
 //! A tower seen from the side at night, in the style of a 16-bit console game,
 //! after tower-building games like SimTower: storeys of desks stacked on a
-//! lobby, one or more per herdr workspace, and an elevator that rides to the
+//! lobby, one or more per herdr workspace, a Claude Code mascot at each desk,
+//! animated by what its agent is doing, and an elevator that rides to the
 //! focused agent.
 //!
 //! The art is PNG files in `assets/`, at half the screen's resolution: the
 //! board shows each pixel as 2x2. Full-width pieces have a file each; small
 //! sprites share `sprites.png`, and `sprites.yaml` says where each one is. Colours are cut to the SNES's 15 bits on
 //! loading. This crate loads them and puts them together: desks onto storeys,
-//! lamps lit or the room tinted by moonlight, and the mascot frames, which
-//! come from the art crate and are cut where their desk hides them. The
+//! lamps lit or the room tinted by moonlight, and the mascot's frames cut
+//! where their desk hides them. The
 //! backdrop (sky and city) stays still; the street, lobby, storeys, roof,
 //! elevator car and mascots are separate images that the firmware stacks at
 //! the positions given here, in art pixels, and scrolls when the tower is
@@ -16,7 +17,7 @@
 //!
 //! The positions here must match the art: the tests check that they do.
 
-use herdr_panel_art::{CANVAS_H, CANVAS_W, Grid, HEIGHT, Ink, ORIGIN, WIDTH};
+use herdr_panel_protocol::Status;
 use serde::Deserialize;
 
 /// Size of the screen in art pixels.
@@ -155,6 +156,11 @@ struct Sprites {
     desk: [usize; 4],
     moonbeam: [usize; 4],
     digits: [usize; 4],
+    mascot_working: [usize; 4],
+    mascot_idle: [usize; 4],
+    mascot_blocked: [usize; 4],
+    mascot_done: [usize; 4],
+    mascot_unknown: [usize; 4],
 }
 
 impl Sprites {
@@ -164,7 +170,7 @@ impl Sprites {
     }
 
     #[cfg(test)]
-    fn all(&self) -> [(&'static str, [usize; 4]); 8] {
+    fn all(&self) -> [(&'static str, [usize; 4]); 13] {
         [
             ("lamp-on", self.lamp_on),
             ("car", self.car),
@@ -174,6 +180,11 @@ impl Sprites {
             ("desk", self.desk),
             ("moonbeam", self.moonbeam),
             ("digits", self.digits),
+            ("mascot-working", self.mascot_working),
+            ("mascot-idle", self.mascot_idle),
+            ("mascot-blocked", self.mascot_blocked),
+            ("mascot-done", self.mascot_done),
+            ("mascot-unknown", self.mascot_unknown),
         ]
     }
 }
@@ -356,13 +367,15 @@ fn desk_at(i: usize) -> (i32, i32) {
 pub struct Slot {
     /// The point between the agent's feet.
     pub feet: (i32, i32),
-    /// Where the top left corner of its [`mascot`] image goes.
+    /// Where the top left corner of its mascot frame goes.
     pub mascot: (i32, i32),
 }
 
-/// Where the mascot's feet are in a [`mascot`] image: the middle of its
-/// bottom edge, below the leg row.
-const MASCOT_FEET: (i32, i32) = ((ORIGIN.0 + WIDTH / 2) as i32, ((ORIGIN.1 + HEIGHT - 1) * 2) as i32);
+/// Size of a mascot frame, and where the mascot's feet are in it: the middle
+/// of its bottom edge.
+pub const MASCOT_W: usize = 24;
+pub const MASCOT_H: usize = 20;
+const MASCOT_FEET: (i32, i32) = (12, 18);
 
 /// The agent's place at desk `i` (0 to [`DESKS_PER_STOREY`] - 1).
 pub fn slot(i: usize) -> Slot {
@@ -370,39 +383,22 @@ pub fn slot(i: usize) -> Slot {
     Slot { feet, mascot: (feet.0 - MASCOT_FEET.0, feet.1 - MASCOT_FEET.1) }
 }
 
-/// The mascot's outline and eyes.
-const OUTLINE: Rgba = [0x40, 0x18, 0x18, 0xff];
-
-/// The mascot frame `grid`, keeping the terminal's shape: each pixel one
-/// wide and two tall, like a character cell, in flat colours picked by
-/// `color`. A dark outline goes round it, which also fills in the gaps that
-/// are its eyes; a drowsy eye ([`Ink::Lid`]) is open only in its lower half.
-pub fn mascot(grid: &Grid, color: impl Fn(Ink) -> Rgba) -> Image {
-    let mut img = Image::new(CANVAS_W, CANVAS_H * 2);
-    for y in 0..CANVAS_H * 2 {
-        for x in 0..CANVAS_W {
-            match grid[y / 2][x] {
-                Some(Ink::Lid) if y % 2 == 1 => {}
-                Some(Ink::Lid) => img.set(x as i32, y as i32, color(Ink::Body)),
-                Some(i) => img.set(x as i32, y as i32, color(i)),
-                None => {}
-            }
-        }
-    }
-    let solid = img.clone();
-    let filled = |x: i32, y: i32| solid.inside(x, y) && solid.get(x as usize, y as usize)[3] != 0;
-    for y in 0..img.h as i32 {
-        for x in 0..img.w as i32 {
-            if !filled(x, y) && (filled(x - 1, y) || filled(x + 1, y) || filled(x, y - 1) || filled(x, y + 1)) {
-                img.set(x, y, OUTLINE);
-            }
-        }
-    }
-    img
+/// The mascot's animation for an agent with `status`: its frames, cut from
+/// its strip in `sprites.png`, and how long each one shows, in milliseconds.
+pub fn animation(status: Status) -> (Vec<Image>, u32) {
+    let (strip, frame_ms) = match status {
+        Status::Working => (sprite(|s| s.mascot_working), 150),
+        Status::Idle => (sprite(|s| s.mascot_idle), 500),
+        Status::Blocked => (sprite(|s| s.mascot_blocked), 250),
+        Status::Done => (sprite(|s| s.mascot_done), 150),
+        Status::Unknown => (sprite(|s| s.mascot_unknown), 1000),
+    };
+    let frames = (0..strip.w / MASCOT_W).map(|i| strip.crop(i * MASCOT_W, 0, MASCOT_W, MASCOT_H)).collect();
+    (frames, frame_ms)
 }
 
-/// `mascot` with the pixels its desk hides cut away, so that drawn over a
-/// [`storey`] at a [`Slot`] it stands behind the desk drawn into the storey.
+/// A mascot frame with the pixels its desk hides cut away, so that drawn over
+/// a [`storey`] at a [`Slot`] it stands behind the desk drawn into the storey.
 pub fn behind_desk(mascot: &Image) -> Image {
     let (s, d) = (slot(0), desk_at(0));
     let desk = desk();
@@ -421,9 +417,14 @@ pub fn behind_desk(mascot: &Image) -> Image {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use herdr_panel_art::{Behavior, frame};
 
-    const BODY: Rgba = [0xd8, 0x78, 0x58, 0xff];
+    const STATUSES: [Status; 5] = [Status::Working, Status::Idle, Status::Blocked, Status::Done, Status::Unknown];
+
+    /// The first and last column with anything drawn in `img`.
+    fn drawn_columns(img: &Image) -> (i32, i32) {
+        let xs = (0..img.w).filter(|&x| (0..img.h).any(|y| img.get(x, y)[3] != 0));
+        (xs.clone().min().unwrap() as i32, xs.max().unwrap() as i32)
+    }
 
     fn size(img: &Image) -> (usize, usize) {
         (img.w, img.h)
@@ -526,28 +527,50 @@ mod tests {
     }
 
     #[test]
+    fn every_status_has_whole_frames() {
+        let sprites = Sprites::load();
+        for [_, _, w, h] in [
+            sprites.mascot_working,
+            sprites.mascot_idle,
+            sprites.mascot_blocked,
+            sprites.mascot_done,
+            sprites.mascot_unknown,
+        ] {
+            assert!(w >= MASCOT_W && w % MASCOT_W == 0 && h == MASCOT_H, "a mascot strip is {w}x{h}");
+        }
+        for s in STATUSES {
+            assert!(!animation(s).0.is_empty(), "{s:?}");
+        }
+    }
+
+    #[test]
+    fn feet_are_at_the_bottom_middle_of_the_mascot() {
+        let (frames, _) = animation(Status::Working);
+        let m = &frames[0];
+        let bottom = (0..m.h).rev().find(|&y| (0..m.w).any(|x| m.get(x, y)[3] != 0)).unwrap() as i32;
+        assert_eq!(bottom, MASCOT_FEET.1);
+        let (lo, hi) = drawn_columns(m);
+        assert!(((lo + hi) / 2 - MASCOT_FEET.0).abs() <= 1, "drawn from {lo} to {hi}");
+    }
+
+    #[test]
     fn mascots_stay_in_the_rooms_and_clear_of_each_other() {
-        // Sparkles may stray; the body and its outline must not.
-        let m = mascot(&frame(Behavior::Work, 0, 1), |_| BODY);
-        let opaque_x = |s: Slot| {
-            let xs = (0..m.w).filter(|&x| (0..m.h).any(|y| m.get(x, y)[3] != 0));
-            let (lo, hi) = (xs.clone().min().unwrap() as i32, xs.max().unwrap() as i32);
-            (s.mascot.0 + lo, s.mascot.0 + hi)
-        };
-        for i in 0..DESKS_PER_STOREY {
-            let (lo, hi) = opaque_x(slot(i));
-            assert!(lo >= ROOMS_X && hi < ROOMS_END, "mascot {i}: {lo}..{hi}");
-            if i > 0 {
-                assert!(lo > opaque_x(slot(i - 1)).1, "mascot {i} overlaps its neighbour");
+        // Sparkles and signs may stray; the working mascot and its outline must not.
+        for m in animation(Status::Working).0 {
+            let (lo, hi) = drawn_columns(&m);
+            for i in 0..DESKS_PER_STOREY {
+                let x = slot(i).mascot.0;
+                assert!(x + lo >= ROOMS_X && x + hi < ROOMS_END, "mascot {i}: {}..{}", x + lo, x + hi);
+                if i > 0 {
+                    assert!(x + lo > slot(i - 1).mascot.0 + hi, "mascot {i} overlaps its neighbour");
+                }
             }
         }
     }
 
     #[test]
-    fn mascot_head_stays_inside_its_storey() {
-        let m = mascot(&frame(Behavior::Done, 0, 1), |_| BODY);
-        let top = (0..m.h).find(|&y| (0..m.w).any(|x| m.get(x, y) == BODY)).unwrap() as i32;
-        assert!(slot(0).mascot.1 + top >= 2, "body starts at {}", slot(0).mascot.1 + top);
+    fn mascots_stay_inside_their_storey() {
+        assert!(slot(0).mascot.1 >= 0 && slot(0).mascot.1 + MASCOT_H as i32 <= STOREY_H as i32);
     }
 
     #[test]
@@ -583,7 +606,7 @@ mod tests {
         // The board draws the cut mascot over a storey with the desk drawn
         // in; that must match drawing the mascot and then the desk on top,
         // except under the desk's translucent glow.
-        let m = mascot(&frame(Behavior::Work, 0, 1), |_| BODY);
+        let m = animation(Status::Working).0.remove(1);
         let s = slot(2);
         let (dx, dy) = desk_at(2);
         let mut room = room(0);
@@ -602,37 +625,6 @@ mod tests {
                 }
             }
         }
-    }
-
-    #[test]
-    fn mascot_is_flat_with_dark_outline_and_eyes() {
-        let m = mascot(&frame(Behavior::Work, 0, 0), |_| BODY);
-        assert!(m.px.iter().all(|p| p[3] == 0 || *p == BODY || *p == OUTLINE), "only body and outline");
-        // Each eye is a gap two pixels tall in the face, filled with the outline.
-        let eye = (ORIGIN.1 + 1) * 2;
-        let eyes = (1..m.w - 1)
-            .filter(|&x| {
-                m.get(x, eye) == OUTLINE && m.get(x, eye + 1) == OUTLINE && m.get(x - 1, eye) == BODY && m.get(x + 1, eye) == BODY
-            })
-            .count();
-        assert_eq!(eyes, 2);
-        assert_eq!(m.get(ORIGIN.0 + WIDTH / 2, ORIGIN.1 * 2 - 1), OUTLINE, "outline above the head");
-    }
-
-    #[test]
-    fn sleeping_mascot_has_drowsy_eyes() {
-        let m = mascot(&frame(Behavior::Sleep, 0, 0), |_| BODY);
-        // Half shut: the eye's upper pixel is lid, the lower one dark.
-        let eye = (ORIGIN.1 + 1) * 2;
-        let eyes = (1..m.w - 1)
-            .filter(|&x| {
-                m.get(x, eye) == BODY
-                    && m.get(x, eye + 1) == OUTLINE
-                    && m.get(x - 1, eye + 1) == BODY
-                    && m.get(x + 1, eye + 1) == BODY
-            })
-            .count();
-        assert_eq!(eyes, 2);
     }
 
     #[test]
@@ -656,5 +648,6 @@ mod tests {
         }
     }
 }
+
 
 

@@ -3,7 +3,7 @@
 
 use alloc::boxed::Box;
 
-use herdr_panel_art::Behavior;
+use herdr_panel_protocol::Status;
 
 /// One looping animation.
 pub struct Loop {

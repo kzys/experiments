@@ -5,7 +5,7 @@ edition = "2024"
 publish = false
 
 [dependencies]
-herdr-panel-art = { path = "../art" }
+herdr-panel-protocol = { path = "../protocol" }
 png = "0.17"
 serde = { version = "1", features = ["derive"] }
 serde-saphyr = "2"

@@ -18,16 +18,11 @@ All Rust.
   are split into storeys. One JSON value per line; externally tagged enums so
   `serde-json-core` on the board can parse them. Tests check the board's parser
   against the bridge's output.
-- `art/`: the mascot and its animations as pixel frames, `no_std`, tested on the
-  laptop. The mascot is the block-character art `▐▛███▜▌ / ▝▜█████▛▘ / ▘▘ ▝▝`
-  turned into pixels (the two gaps in the top row are the eyes). One looping
-  animation per state, plus a random "play" mood that is written but not used yet.
-  Each pixel is drawn one wide and two tall, like the terminal's character cells.
 - `assets/`: the tower's art as PNG files (see Art below).
 - `scene/`: loads the art and puts the tower together on the laptop: desks
   onto storeys, lamps lit or the room tinted by moonlight when every agent
-  there is idle, and the flat, outlined mascot frames, cut where their desk
-  hides them. Also says where everything goes. `cargo run -p
+  there is idle, and the mascot's frames, cut where their desk hides them.
+  Also says where everything goes and how fast each animation plays. `cargo run -p
   herdr-panel-scene --example preview -- out.png 2,1,8 [scroll]` draws the
   screen with workspaces of two, one and eight agents.
 - `bridge/`: reads `agent.list` and `workspace.list` from herdr's socket
@@ -43,7 +38,7 @@ All Rust.
   car slides to its storey, and the view jumps there unless an arrow was
   pressed in the last 10 s. LVGL gets 512 KB of PSRAM on top of its 48 KB
   internal pool, for the widgets of a tall tower.
-  `build.rs` renders the images from `scene/` and `art/` to PNGs, converts
+  `build.rs` renders the images from `scene/` to PNGs at screen size, converts
   them with LVGL's `LVGLImage.py` and compiles them in.
   Separate from the workspace because it needs the Xtensa toolchain
   (`cargo +esp`).
@@ -76,15 +71,20 @@ The sprites in `sprites.png`:
 | `arrow-up`, `arrow-down` | the scroll buttons, 14x14 |
 | `digits` | 0 to 9 for storey numbers, 4x6 each, in a row |
 | `plumbob` | the marker over the focused agent |
+| `mascot-working`, `mascot-idle`, `mascot-blocked`, `mascot-done`, `mascot-unknown` | the mascot's animation for each herdr status: frames of 24x20 in a row, as many as the strip is wide |
 
 To move or resize a sprite, change it in `sprites.png` and its entry in
 `sprites.yaml`. A misspelt or missing name, a sprite outside the sheet, or
 two that overlap fail the scene tests.
 
 Sizes and positions (where desks, lamps and agents go) are constants in
-`scene/src/lib.rs`; its tests fail if a PNG's size no longer matches them.
-The mascot is not a PNG: its poses come from the terminal block art in
-`art/`.
+`scene/src/lib.rs`, as are the mascot's frame timings; its tests fail if a
+PNG's size no longer matches them. A mascot frame has the feet at the
+middle of its bottom edge (12, 18), and the desk hides its lower part.
+
+The mascot started as the terminal's block-character art
+`▐▛███▜▌ / ▝▜█████▛▘ / ▘▘ ▝▝`, each pixel one wide and two tall like a
+character cell, with a dark outline that also makes the eyes.
 
 ## Animations
 
@@ -96,7 +96,8 @@ The mascot is not a PNG: its poses come from the terminal block art in
 | done | hopping, arms up, sparkles |
 | unknown | a "?" above it |
 
-The "z", "!", "?" and sparkles stay flat, next to the mascot's head.
+Frames show for 150 ms when working or done, 250 ms when blocked, 500 ms when
+idle, and 1 s (a single frame) when unknown.
 
 ## Messages
 

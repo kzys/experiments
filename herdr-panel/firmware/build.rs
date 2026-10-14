@@ -1,7 +1,7 @@
 //! Links the ESP-HAL linker script and turns the art into LVGL images: the
 //! tower's backdrop, street, lobby, storeys, digits, roof and elevator, which
 //! the scene crate puts together from the PNGs in `assets/`, and each mascot
-//! frame from the art crate (cut where its desk hides it). Each is written as
+//! frame (cut where its desk hides it). Each is written as
 //! a PNG at screen size, converted with LVGL's `LVGLImage.py` (needs Python
 //! with `pypng` and `lz4`) into an `lv_image_dsc_t`, and compiled in.
 //! `frames.rs`, included by the firmware, declares them, lists each
@@ -16,31 +16,22 @@ use std::{
     process::Command,
 };
 
-use herdr_panel_art::{Behavior, Ink, cycle, frame};
+use herdr_panel_protocol::Status;
 use herdr_panel_scene::{
     ARROW_X, CAR_AT, DESK_SPACING, DESKS_PER_STOREY, DESKS_X, GROUND_Y, Image, PLUMBOB_ABOVE, ROOF_H, SCALE, STOREY_H, WALLPAPERS,
-    arrow, backdrop, behind_desk, car, digits, lobby, mascot, number_at, plumbob, roof, slot, storey, street,
+    animation, arrow, backdrop, behind_desk, car, digits, lobby, number_at, plumbob, roof, slot, storey, street,
 };
 use oxivgl_build::ImageConfig;
 
-/// The behaviors the firmware animates, with the names used in symbols.
-const ANIMATIONS: [(Behavior, &str); 5] = [
-    (Behavior::Work, "work"),
-    (Behavior::Sleep, "sleep"),
-    (Behavior::Blocked, "blocked"),
-    (Behavior::Done, "done"),
-    (Behavior::Unknown, "unknown"),
+/// The statuses the mascot has an animation for, with the names used in
+/// symbols.
+const ANIMATIONS: [(Status, &str); 5] = [
+    (Status::Working, "working"),
+    (Status::Idle, "idle"),
+    (Status::Blocked, "blocked"),
+    (Status::Done, "done"),
+    (Status::Unknown, "unknown"),
 ];
-
-fn color(ink: Ink) -> [u8; 4] {
-    match ink {
-        Ink::Body | Ink::Lid => [0xd9, 0x77, 0x57, 0xff],
-        Ink::Zzz => [0x29, 0xad, 0xff, 0xff],
-        Ink::Alert => [0xff, 0x00, 0x4d, 0xff],
-        Ink::Spark => [0xff, 0xec, 0x27, 0xff],
-        Ink::Question => [0xc2, 0xc3, 0xc7, 0xff],
-    }
-}
 
 /// Writes `img` at screen size, with alpha only if `alpha`.
 fn write_png(path: &Path, img: &Image, alpha: bool) {
@@ -78,7 +69,6 @@ fn convert(cfg: &ImageConfig, out: &Path, symbol: &str, png: &Path, cf: &str) {
 
 fn main() {
     println!("cargo:rustc-link-arg=-Tlinkall.x");
-    println!("cargo:rerun-if-changed=../art/src/lib.rs");
     println!("cargo:rerun-if-changed=../scene/src/lib.rs");
     println!("cargo:rerun-if-changed=../assets");
     println!("cargo:rerun-if-changed=build.rs");
@@ -89,21 +79,21 @@ fn main() {
 
     let mut declarations = String::new();
     let mut loops = String::new();
-    for (behavior, name) in ANIMATIONS {
-        let c = cycle(behavior);
+    for (status, name) in ANIMATIONS {
+        let (frames, frame_ms) = animation(status);
         let mut pointers = String::new();
-        for i in 0..c.frames {
+        for (i, frame) in frames.iter().enumerate() {
             let symbol = format!("mascot_{name}_{i}");
             let png = out.join(format!("{symbol}.png"));
-            write_png(&png, &behind_desk(&mascot(&frame(behavior, 0, i * c.tick_step), color)), true);
+            write_png(&png, &behind_desk(frame), true);
             convert(&cfg, &out, &symbol, &png, "ARGB8888");
             writeln!(declarations, "oxivgl::image_declare!({symbol});").unwrap();
             write!(pointers, "{symbol}() as *const _ as *const core::ffi::c_void, ").unwrap();
         }
         writeln!(
             loops,
-            "        (Behavior::{behavior:?}, Loop {{ frames: Box::leak(Box::new([{pointers}])), duration_ms: {} }}),",
-            c.frames * c.frame_ms
+            "        (Status::{status:?}, Loop {{ frames: Box::leak(Box::new([{pointers}])), duration_ms: {} }}),",
+            frames.len() as u32 * frame_ms
         )
         .unwrap();
     }
@@ -167,9 +157,9 @@ fn main() {
     };
     let source = format!(
         "{declarations}\n\
-         /// The animation for each behavior. Call once: it leaks the frame lists, which\n\
+         /// The animation for each agent status. Call once: it leaks the frame lists, which\n\
          /// LVGL keeps pointers to.\n\
-         pub fn loops() -> [(Behavior, Loop); {n}] {{\n    [\n{loops}    ]\n}}\n\n\
+         pub fn loops() -> [(Status, Loop); {n}] {{\n    [\n{loops}    ]\n}}\n\n\
          /// The marker over the focused agent, bobbing. Call once, like [`loops`].\n\
          pub fn plumbob() -> Loop {{\n    Loop {{ frames: Box::leak(Box::new([{pointers}])), duration_ms: 1200 }}\n}}\n\n\
          /// The roof, its antenna light blinking. Call once, like [`loops`].\n\

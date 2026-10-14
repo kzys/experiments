@@ -183,13 +183,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "herdr-panel-art"
-version = "0.1.0"
-dependencies = [
- "heapless 0.9.3",
-]
-
-[[package]]
 name = "herdr-panel-bridge"
 version = "0.1.0"
 dependencies = [
@@ -213,7 +206,7 @@ dependencies = [
 name = "herdr-panel-scene"
 version = "0.1.0"
 dependencies = [
- "herdr-panel-art",
+ "herdr-panel-protocol",
  "png",
  "serde",
  "serde-saphyr",
