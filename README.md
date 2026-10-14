@@ -1,7 +1,8 @@
 # experiments
 
 Small projects that don't need a repository of their own yet. Each directory
-stands alone, with its own README, build and tests.
+stands alone, with its own README, build and tests. Some of them are vibe
+coded.
 
 ## herdr-panel
 
