@@ -18,8 +18,10 @@ use std::{
 
 use herdr_panel_protocol::Status;
 use herdr_panel_scene::{
-    ARROW_SIZE, ARROW_X, CAR_AT, DECOR_AT, DECORS, DESK_SPACING, DESKS_PER_STOREY, DESKS_X, GROUND_Y, Image, PLUMBOB_ABOVE, ROOF_H, SCALE, STOREY_H, WALLPAPERS,
-    animation, arrow, awake_animation, backdrop, behind_desk, car, decor, digits, lobby, number_at, plumbob, roof, slot, storey, street,
+    ARROW_SIZE, ARROW_X, CAR_AT, DECOR_AT, DECORS, DESK_SPACING, DESKS_PER_STOREY, DESKS_X,
+    GROUND_Y, Image, PLUMBOB_ABOVE, ROOF_H, SCALE, STOREY_H, WALLPAPERS, animation, arrow,
+    awake_animation, backdrop, behind_desk, car, decor, digits, lobby, number_at, plumbob, roof,
+    slot, storey, street,
 };
 use oxivgl_build::ImageConfig;
 
@@ -41,10 +43,22 @@ fn write_png(path: &Path, img: &Image, alpha: bool) {
     } else {
         img.px.iter().flat_map(|p| [p[0], p[1], p[2]]).collect()
     };
-    let mut encoder = png::Encoder::new(BufWriter::new(File::create(path).unwrap()), img.w as u32, img.h as u32);
-    encoder.set_color(if alpha { png::ColorType::Rgba } else { png::ColorType::Rgb });
+    let mut encoder = png::Encoder::new(
+        BufWriter::new(File::create(path).unwrap()),
+        img.w as u32,
+        img.h as u32,
+    );
+    encoder.set_color(if alpha {
+        png::ColorType::Rgba
+    } else {
+        png::ColorType::Rgb
+    });
     encoder.set_depth(png::BitDepth::Eight);
-    encoder.write_header().unwrap().write_image_data(&data).unwrap();
+    encoder
+        .write_header()
+        .unwrap()
+        .write_image_data(&data)
+        .unwrap();
 }
 
 /// Converts `png` to a C image named `symbol` in colour format `cf` and
@@ -52,7 +66,9 @@ fn write_png(path: &Path, img: &Image, alpha: bool) {
 fn convert(cfg: &ImageConfig, out: &Path, symbol: &str, png: &Path, cf: &str) {
     let status = Command::new("python3")
         .arg(&cfg.converter)
-        .args(["--ofmt", "C", "--cf", cf, "--align", "1", "--name", symbol, "-o"])
+        .args([
+            "--ofmt", "C", "--cf", cf, "--align", "1", "--name", symbol, "-o",
+        ])
         .arg(out)
         .arg(png)
         .status()
@@ -88,7 +104,11 @@ fn main() {
             write_png(&png, &behind_desk(frame), true);
             convert(&cfg, &out, &symbol, &png, "ARGB8888");
             writeln!(declarations, "oxivgl::image_declare!({symbol});").unwrap();
-            write!(pointers, "{symbol}() as *const _ as *const core::ffi::c_void, ").unwrap();
+            write!(
+                pointers,
+                "{symbol}() as *const _ as *const core::ffi::c_void, "
+            )
+            .unwrap();
         }
         writeln!(
             loops,
@@ -105,7 +125,11 @@ fn main() {
         write_png(&png, &behind_desk(frame), true);
         convert(&cfg, &out, &symbol, &png, "ARGB8888");
         writeln!(declarations, "oxivgl::image_declare!({symbol});").unwrap();
-        write!(awake, "{symbol}() as *const _ as *const core::ffi::c_void, ").unwrap();
+        write!(
+            awake,
+            "{symbol}() as *const _ as *const core::ffi::c_void, "
+        )
+        .unwrap();
     }
     let awake_ms = frames.len() as u32 * frame_ms;
 
@@ -120,13 +144,23 @@ fn main() {
         write_png(&png, &img, true);
         convert(&cfg, &out, &symbol, &png, "ARGB8888");
         writeln!(declarations, "oxivgl::image_declare!({symbol});").unwrap();
-        write!(pointers, "{symbol}() as *const _ as *const core::ffi::c_void, ").unwrap();
+        write!(
+            pointers,
+            "{symbol}() as *const _ as *const core::ffi::c_void, "
+        )
+        .unwrap();
     }
     // Opaque images are RGB565, like the panel; sprites keep their alpha.
     let mut image = |symbol: &str, img: &Image, alpha: bool| {
         let png = out.join(format!("{symbol}.png"));
         write_png(&png, img, alpha);
-        convert(&cfg, &out, symbol, &png, if alpha { "ARGB8888" } else { "RGB565" });
+        convert(
+            &cfg,
+            &out,
+            symbol,
+            &png,
+            if alpha { "ARGB8888" } else { "RGB565" },
+        );
         writeln!(declarations, "oxivgl::image_declare!({symbol});").unwrap();
     };
     image("backdrop", &backdrop(), false);
@@ -160,7 +194,11 @@ fn main() {
     for (i, img) in roof().iter().enumerate() {
         let symbol = format!("roof_{i}");
         image(&symbol, img, true);
-        write!(roof_frames, "{symbol}() as *const _ as *const core::ffi::c_void, ").unwrap();
+        write!(
+            roof_frames,
+            "{symbol}() as *const _ as *const core::ffi::c_void, "
+        )
+        .unwrap();
     }
 
     let scale = SCALE as i32;
@@ -168,11 +206,19 @@ fn main() {
     let mut slots = String::new();
     for i in 0..DESKS_PER_STOREY {
         let s = slot(i);
-        writeln!(slots, "    Slot {{ feet: {}, mascot: {} }},", at(s.feet), at(s.mascot)).unwrap();
+        writeln!(
+            slots,
+            "    Slot {{ feet: {}, mascot: {} }},",
+            at(s.feet),
+            at(s.mascot)
+        )
+        .unwrap();
     }
     let number_at: Vec<String> = (1..=3).map(|len| at(number_at(len))).collect();
     let image_fn = |name: &str, doc: &str| {
-        format!("/// {doc}\npub fn {name}_image() -> &'static oxivgl::widgets::lv_image_dsc_t {{ {name}() }}\n\n")
+        format!(
+            "/// {doc}\npub fn {name}_image() -> &'static oxivgl::widgets::lv_image_dsc_t {{ {name}() }}\n\n"
+        )
     };
     let source = format!(
         "{declarations}\n\
@@ -226,8 +272,14 @@ fn main() {
          /// Where the agents at each desk go, relative to the storey.\n\
          pub const SLOTS: [Slot; {DESKS_PER_STOREY}] = [\n{slots}];\n",
         n = ANIMATIONS.len(),
-        backdrop = image_fn("backdrop", "The sky and the city, filling the screen; it stays still."),
-        street = image_fn("street", "The street, from `GROUND_Y` to the bottom of the screen."),
+        backdrop = image_fn(
+            "backdrop",
+            "The sky and the city, filling the screen; it stays still."
+        ),
+        street = image_fn(
+            "street",
+            "The street, from `GROUND_Y` to the bottom of the screen."
+        ),
         lobby = image_fn("lobby", "The lobby, storey 0."),
         car = image_fn("car", "The elevator car."),
         arrow_up = image_fn("arrow_up", "The button that scrolls up a storey."),

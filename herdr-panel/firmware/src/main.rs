@@ -33,7 +33,9 @@ use esp_hal::{
 use esp_rtos::embassy::InterruptExecutor;
 use oxivgl::{
     display::{Buffers, COLOR_BUF_LINES, LvglBuffers},
-    flush_pipeline::{DisplayOutput, SemaphoreFlushSync, UiError, flush_frame_buffer, set_flush_sync},
+    flush_pipeline::{
+        DisplayOutput, SemaphoreFlushSync, UiError, flush_frame_buffer, set_flush_sync,
+    },
     view::{RenderConfig, Ui},
 };
 use st77922::{HEIGHT as SCREEN_H, St77922, WIDTH as SCREEN_W};
@@ -54,8 +56,18 @@ struct DisplayDriver {
 unsafe impl Send for DisplayDriver {}
 
 impl DisplayOutput for DisplayDriver {
-    async fn show_raw_data(&mut self, x: u16, y: u16, w: u16, h: u16, data: &[u8]) -> Result<(), UiError> {
-        self.display.write_pixels(x, y, w, h, data).await.map_err(|_| UiError::Display)
+    async fn show_raw_data(
+        &mut self,
+        x: u16,
+        y: u16,
+        w: u16,
+        h: u16,
+        data: &[u8],
+    ) -> Result<(), UiError> {
+        self.display
+            .write_pixels(x, y, w, h, data)
+            .await
+            .map_err(|_| UiError::Display)
     }
 }
 
@@ -87,7 +99,8 @@ impl esp_rtos::embassy::Callbacks for UiHooks {
 
 #[embassy_executor::task]
 async fn render_task(ui: &'static Ui) -> ! {
-    ui.run_events(ui::Panel::new(), RenderConfig::default()).await
+    ui.run_events(ui::Panel::new(), RenderConfig::default())
+        .await
 }
 
 /// Widens invalidated areas to multiples of 4 pixels, which this panel needs
@@ -110,7 +123,11 @@ extern "C" fn render_thread(_: *mut core::ffi::c_void) {
     // SAFETY: touched only here, before this thread owns LVGL.
     let bufs = unsafe { &mut *core::ptr::addr_of_mut!(BUFS) };
     static UI: StaticCell<Ui> = StaticCell::new();
-    let ui: &'static Ui = UI.init(Ui::init(SCREEN_W.into(), SCREEN_H.into(), Buffers::partial(bufs)));
+    let ui: &'static Ui = UI.init(Ui::init(
+        SCREEN_W.into(),
+        SCREEN_H.into(),
+        Buffers::partial(bufs),
+    ));
     // SAFETY: Ui::init created the default display on this (the LVGL) thread.
     unsafe {
         oxivgl_sys::lv_display_add_event_cb(
@@ -131,7 +148,8 @@ extern "C" fn render_thread(_: *mut core::ffi::c_void) {
 
 #[esp_rtos::main]
 async fn main(spawner: Spawner) {
-    let p = esp_hal::init(esp_hal::Config::default().with_cpu_clock(esp_hal::clock::CpuClock::max()));
+    let p =
+        esp_hal::init(esp_hal::Config::default().with_cpu_clock(esp_hal::clock::CpuClock::max()));
     esp_println::logger::init_logger_from_env();
     esp_alloc::heap_allocator!(size: 64 * 1024);
 
@@ -139,7 +157,10 @@ async fn main(spawner: Spawner) {
     let (start, size) = psram.raw_parts();
     // SAFETY: PSRAM stays mapped for the program's life, and only LVGL uses it.
     let pool = unsafe {
-        core::slice::from_raw_parts_mut(start as *mut core::mem::MaybeUninit<u8>, size.min(LVGL_PSRAM_POOL))
+        core::slice::from_raw_parts_mut(
+            start as *mut core::mem::MaybeUninit<u8>,
+            size.min(LVGL_PSRAM_POOL),
+        )
     };
     oxivgl::mem::reserve_pool(pool).expect("LVGL PSRAM pool");
 
@@ -152,20 +173,31 @@ async fn main(spawner: Spawner) {
     // Display: quad SPI.
     let (rx, rx_desc, tx, tx_desc) = dma_buffers!(64, LVGL_BUF_BYTES);
     const ALIGNED: &str = "dma_buffers! is DMA-aligned";
-    let dma_rx = DmaRxBuf::new(DmaAlignedMut::new(rx_desc).expect(ALIGNED), DmaAlignedMut::new(rx).expect(ALIGNED))
-        .expect("dma rx");
-    let dma_tx = DmaTxBuf::new(DmaAlignedMut::new(tx_desc).expect(ALIGNED), DmaAlignedMut::new(tx).expect(ALIGNED))
-        .expect("dma tx");
-    let spi = Spi::new(p.SPI2, SpiConfig::default().with_frequency(Rate::from_mhz(80)).with_mode(Mode::_0))
-        .expect("spi cfg")
-        .with_sck(p.GPIO12)
-        .with_sio0(p.GPIO11)
-        .with_sio1(p.GPIO13)
-        .with_sio2(p.GPIO14)
-        .with_sio3(p.GPIO9)
-        .with_dma(p.DMA_CH0)
-        .with_buffers(dma_rx, dma_tx)
-        .into_async();
+    let dma_rx = DmaRxBuf::new(
+        DmaAlignedMut::new(rx_desc).expect(ALIGNED),
+        DmaAlignedMut::new(rx).expect(ALIGNED),
+    )
+    .expect("dma rx");
+    let dma_tx = DmaTxBuf::new(
+        DmaAlignedMut::new(tx_desc).expect(ALIGNED),
+        DmaAlignedMut::new(tx).expect(ALIGNED),
+    )
+    .expect("dma tx");
+    let spi = Spi::new(
+        p.SPI2,
+        SpiConfig::default()
+            .with_frequency(Rate::from_mhz(80))
+            .with_mode(Mode::_0),
+    )
+    .expect("spi cfg")
+    .with_sck(p.GPIO12)
+    .with_sio0(p.GPIO11)
+    .with_sio1(p.GPIO13)
+    .with_sio2(p.GPIO14)
+    .with_sio3(p.GPIO9)
+    .with_dma(p.DMA_CH0)
+    .with_buffers(dma_rx, dma_tx)
+    .into_async();
     let cs = Output::new(p.GPIO10, Level::High, OutputConfig::default());
     let mut backlight = Output::new(p.GPIO41, Level::Low, OutputConfig::default());
     let mut display = St77922::new(spi, cs);
@@ -173,11 +205,14 @@ async fn main(spawner: Spawner) {
     backlight.set_high();
 
     // Touch controller.
-    let i2c = I2c::new(p.I2C0, I2cConfig::default().with_frequency(Rate::from_khz(400)))
-        .expect("i2c cfg")
-        .with_sda(p.GPIO38)
-        .with_scl(p.GPIO39)
-        .into_async();
+    let i2c = I2c::new(
+        p.I2C0,
+        I2cConfig::default().with_frequency(Rate::from_khz(400)),
+    )
+    .expect("i2c cfg")
+    .with_sda(p.GPIO38)
+    .with_scl(p.GPIO39)
+    .into_async();
     let touch_rst = Output::new(p.GPIO48, Level::High, OutputConfig::default());
     spawner.spawn(touch_task(i2c, touch_rst).unwrap());
 
@@ -193,7 +228,13 @@ async fn main(spawner: Spawner) {
 
     // SAFETY: render_thread never returns.
     unsafe {
-        sched::spawn("ui-render", render_thread, sched::PRIO_RENDER, sched::RENDER_STACK, sched::RENDER_CORE)
+        sched::spawn(
+            "ui-render",
+            render_thread,
+            sched::PRIO_RENDER,
+            sched::RENDER_STACK,
+            sched::RENDER_CORE,
+        )
     };
     core::future::pending::<()>().await
 }

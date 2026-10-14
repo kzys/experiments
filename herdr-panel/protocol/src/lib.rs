@@ -68,8 +68,12 @@ pub enum ToBoard {
 
 /// The messages that send `state`, in order.
 pub fn messages(state: &State) -> impl Iterator<Item = ToBoard> + '_ {
-    let begin = ToBoard::Begin { count: state.agents.len() as u16 };
-    core::iter::once(begin).chain(state.agents.iter().cloned().map(ToBoard::Agent)).chain(core::iter::once(ToBoard::End))
+    let begin = ToBoard::Begin {
+        count: state.agents.len() as u16,
+    };
+    core::iter::once(begin)
+        .chain(state.agents.iter().cloned().map(ToBoard::Agent))
+        .chain(core::iter::once(ToBoard::End))
 }
 
 /// Rebuilds states from [`messages`], one message at a time.
@@ -83,7 +87,10 @@ pub struct Assembler {
 
 impl Assembler {
     pub const fn new() -> Self {
-        Self { state: State { agents: Vec::new() }, expected: None }
+        Self {
+            state: State { agents: Vec::new() },
+            expected: None,
+        }
     }
 
     /// Takes the next message. On an `End` that completes a state, returns
@@ -102,7 +109,10 @@ impl Assembler {
                 }
             }
             ToBoard::End => {
-                let complete = self.expected.take().is_some_and(|n| usize::from(n) == self.state.agents.len());
+                let complete = self
+                    .expected
+                    .take()
+                    .is_some_and(|n| usize::from(n) == self.state.agents.len());
                 return complete.then_some(&mut self.state);
             }
         }
@@ -149,7 +159,9 @@ impl Storey<'_> {
     /// Whether the storey's lights are on: someone there is not idle, or
     /// has the focus.
     pub fn lit(&self) -> bool {
-        self.agents.iter().any(|a| a.status != Status::Idle || a.focused)
+        self.agents
+            .iter()
+            .any(|a| a.status != Status::Idle || a.focused)
     }
 }
 
@@ -169,10 +181,17 @@ pub fn storeys(agents: &[Agent], per_storey: usize) -> impl Iterator<Item = Stor
             index += 1;
         }
         previous = Some(ws);
-        let run = rest.iter().take_while(|a| workspace(&a.id) == ws).count().min(per_storey);
+        let run = rest
+            .iter()
+            .take_while(|a| workspace(&a.id) == ws)
+            .count()
+            .min(per_storey);
         let (storey, tail) = rest.split_at(run);
         rest = tail;
-        Some(Storey { workspace: index, agents: storey })
+        Some(Storey {
+            workspace: index,
+            agents: storey,
+        })
     })
 }
 
@@ -185,16 +204,28 @@ mod tests {
     fn sample() -> State {
         let mut agents = Vec::new();
         agents
-            .push(Agent { id: truncated("w1:p1"), label: truncated("herdr-panel"), status: Status::Working, focused: true })
+            .push(Agent {
+                id: truncated("w1:p1"),
+                label: truncated("herdr-panel"),
+                status: Status::Working,
+                focused: true,
+            })
             .unwrap();
         agents
-            .push(Agent { id: truncated("w2:p1"), label: truncated("dotfiles"), status: Status::Idle, focused: false })
+            .push(Agent {
+                id: truncated("w2:p1"),
+                label: truncated("dotfiles"),
+                status: Status::Idle,
+                focused: false,
+            })
             .unwrap();
         State { agents }
     }
 
     fn lines(state: &State) -> std::vec::Vec<std::string::String> {
-        messages(state).map(|m| serde_json::to_string(&m).unwrap()).collect()
+        messages(state)
+            .map(|m| serde_json::to_string(&m).unwrap())
+            .collect()
     }
 
     #[test]
@@ -212,8 +243,13 @@ mod tests {
 
     #[test]
     fn host_messages_use_short_json() {
-        let focus = ToHost::Focus { agent: truncated("w1:p2") };
-        assert_eq!(serde_json::to_string(&focus).unwrap(), r#"{"Focus":{"agent":"w1:p2"}}"#);
+        let focus = ToHost::Focus {
+            agent: truncated("w1:p2"),
+        };
+        assert_eq!(
+            serde_json::to_string(&focus).unwrap(),
+            r#"{"Focus":{"agent":"w1:p2"}}"#
+        );
         assert_eq!(serde_json::to_string(&ToHost::Hello).unwrap(), r#""Hello""#);
     }
 
@@ -241,7 +277,10 @@ mod tests {
             }
         }
         // The next complete state gets through.
-        let last = messages(&sample()).map(|m| asm.push(m).map(|s| s.clone())).last().flatten();
+        let last = messages(&sample())
+            .map(|m| asm.push(m).map(|s| s.clone()))
+            .last()
+            .flatten();
         assert_eq!(last, Some(sample()));
     }
 
@@ -255,13 +294,21 @@ mod tests {
     #[test]
     fn an_empty_state_is_a_state() {
         let mut asm = Assembler::new();
-        let last = messages(&State::default()).map(|m| asm.push(m).map(|s| s.clone())).last().flatten();
+        let last = messages(&State::default())
+            .map(|m| asm.push(m).map(|s| s.clone()))
+            .last()
+            .flatten();
         assert_eq!(last, Some(State::default()));
     }
 
     #[test]
     fn bridge_parser_reads_the_board_output() {
-        for msg in [ToHost::Hello, ToHost::Focus { agent: truncated("w1:p2") }] {
+        for msg in [
+            ToHost::Hello,
+            ToHost::Focus {
+                agent: truncated("w1:p2"),
+            },
+        ] {
             let mut buf = [0u8; 64];
             let n = serde_json_core::to_slice(&msg, &mut buf).unwrap();
             let json = core::str::from_utf8(&buf[..n]).unwrap();
@@ -277,12 +324,19 @@ mod tests {
 
     fn agents(ids: &[&str]) -> std::vec::Vec<Agent> {
         ids.iter()
-            .map(|id| Agent { id: truncated(id), label: Label::new(), status: Status::Idle, focused: false })
+            .map(|id| Agent {
+                id: truncated(id),
+                label: Label::new(),
+                status: Status::Idle,
+                focused: false,
+            })
             .collect()
     }
 
     fn shape(agents: &[Agent], per: usize) -> std::vec::Vec<(usize, usize)> {
-        storeys(agents, per).map(|s| (s.workspace, s.agents.len())).collect()
+        storeys(agents, per)
+            .map(|s| (s.workspace, s.agents.len()))
+            .collect()
     }
 
     #[test]
@@ -293,7 +347,8 @@ mod tests {
 
     #[test]
     fn a_big_workspace_takes_several_storeys() {
-        let ids: std::vec::Vec<std::string::String> = (0..14).map(|i| std::format!("w1:p{i}")).collect();
+        let ids: std::vec::Vec<std::string::String> =
+            (0..14).map(|i| std::format!("w1:p{i}")).collect();
         let mut a = agents(&ids.iter().map(|s| s.as_str()).collect::<std::vec::Vec<_>>());
         a.extend(agents(&["w2:p1"]));
         assert_eq!(shape(&a, 6), [(0, 6), (0, 6), (0, 2), (1, 1)]);
@@ -308,7 +363,9 @@ mod tests {
     #[test]
     fn storeys_keep_every_agent_in_order() {
         let a = agents(&["w1:p1", "w1:p2", "w1:p3", "w2:p1", "w2:p2"]);
-        let flat: std::vec::Vec<&str> = storeys(&a, 2).flat_map(|s| s.agents.iter().map(|a| a.id.as_str())).collect();
+        let flat: std::vec::Vec<&str> = storeys(&a, 2)
+            .flat_map(|s| s.agents.iter().map(|a| a.id.as_str()))
+            .collect();
         assert_eq!(flat, ["w1:p1", "w1:p2", "w1:p3", "w2:p1", "w2:p2"]);
     }
 
@@ -338,7 +395,11 @@ mod tests {
                 .push(Agent {
                     id: truncated("wXXXXXXXXXX:pNNNN"),
                     label: truncated("a-long-agent-label-of-24"),
-                    status: if i % 2 == 0 { Status::Unknown } else { Status::Blocked },
+                    status: if i % 2 == 0 {
+                        Status::Unknown
+                    } else {
+                        Status::Blocked
+                    },
                     focused: i == 0,
                 })
                 .unwrap();

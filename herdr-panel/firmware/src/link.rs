@@ -9,8 +9,8 @@ use core::cell::RefCell;
 use embassy_sync::blocking_mutex::{Mutex, raw::CriticalSectionRawMutex};
 use embassy_time::{Instant, Timer};
 use esp_hal::{Blocking, usb::usb_serial_jtag::UsbSerialJtagRx};
-use herdr_panel_protocol::{Assembler, MAX_LINE, State, ToBoard, ToHost};
 use herdr_panel_protocol::heapless::Vec;
+use herdr_panel_protocol::{Assembler, MAX_LINE, State, ToBoard, ToHost};
 
 struct Shared {
     /// Bumped on every state received; 0 until the first one.
@@ -18,8 +18,10 @@ struct Shared {
     state: State,
 }
 
-static SHARED: Mutex<CriticalSectionRawMutex, RefCell<Shared>> =
-    Mutex::new(RefCell::new(Shared { version: 0, state: State { agents: Vec::new() } }));
+static SHARED: Mutex<CriticalSectionRawMutex, RefCell<Shared>> = Mutex::new(RefCell::new(Shared {
+    version: 0,
+    state: State { agents: Vec::new() },
+}));
 
 /// Copies the latest state into `out` if it is newer than `seen`, and returns
 /// its version. Copies agent by agent: a whole state is too big for the stack.

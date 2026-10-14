@@ -27,10 +27,10 @@ use oxivgl::{
 
 use crate::{
     frames::{
-        ARROW_SIZE, ARROW_X, CAR_AT, DECOR_AT, DECORS, DESK_SPACING, DESKS_PER_STOREY, DESKS_X, DIGIT_W, GROUND_Y,
-        Loop, NUMBER_AT, PLUMBOB_ABOVE, PLUMBOB_W, ROOF_H, SLOTS, STOREY_H, arrow_down_image, arrow_up_image, awake,
-        backdrop_image, car_image, decor_image, digit_image, lobby_image, loops, plumbob, roof, storey_image,
-        street_image,
+        ARROW_SIZE, ARROW_X, CAR_AT, DECOR_AT, DECORS, DESK_SPACING, DESKS_PER_STOREY, DESKS_X,
+        DIGIT_W, GROUND_Y, Loop, NUMBER_AT, PLUMBOB_ABOVE, PLUMBOB_W, ROOF_H, SLOTS, STOREY_H,
+        arrow_down_image, arrow_up_image, awake, backdrop_image, car_image, decor_image,
+        digit_image, lobby_image, loops, plumbob, roof, storey_image, street_image,
     },
     link,
     touch::POINTER,
@@ -118,7 +118,9 @@ impl Panel {
             follow: None,
             manual_scroll: None,
             shown: 0,
-            state: State { agents: herdr_panel_protocol::heapless::Vec::new() },
+            state: State {
+                agents: herdr_panel_protocol::heapless::Vec::new(),
+            },
         }
     }
 
@@ -135,16 +137,27 @@ impl Panel {
         Ok(img)
     }
 
-    fn looping(&self, parent: &impl AsLvHandle, l: &Loop, x: i32, y: i32) -> Result<AnimImg<'static>, WidgetError> {
+    fn looping(
+        &self,
+        parent: &impl AsLvHandle,
+        l: &Loop,
+        x: i32,
+        y: i32,
+    ) -> Result<AnimImg<'static>, WidgetError> {
         let img = AnimImg::new(parent)?;
         img.pos(x, y);
-        img.set_src(l.frames).set_duration(l.duration_ms).set_repeat_count(ANIM_REPEAT_INFINITE).start();
+        img.set_src(l.frames)
+            .set_duration(l.duration_ms)
+            .set_repeat_count(ANIM_REPEAT_INFINITE)
+            .start();
         Ok(img)
     }
 
     /// Rebuilds the tower for `self.state`.
     fn render(&mut self) -> Result<(), WidgetError> {
-        let Some(scroller) = &self.scroller else { return Ok(()) };
+        let Some(scroller) = &self.scroller else {
+            return Ok(());
+        };
         self.rendered = Rendered::default();
         let mut r = Rendered::default();
         let storeys: Vec<_> = storeys(&self.state.agents, DESKS_PER_STOREY).collect();
@@ -158,16 +171,25 @@ impl Panel {
         self.offset = offset;
         let at = |y: i32| y + offset;
 
-        r.images.push(self.image(scroller, street_image(), 0, at(GROUND_Y))?);
-        r.images.push(self.image(scroller, lobby_image(), 0, at(storey_top(0)))?);
+        r.images
+            .push(self.image(scroller, street_image(), 0, at(GROUND_Y))?);
+        r.images
+            .push(self.image(scroller, lobby_image(), 0, at(storey_top(0)))?);
         let mut focused = 0;
         for (k, storey) in storeys.iter().enumerate() {
             let level = k + 1;
             let top = at(storey_top(level));
             let lit = storey.lit();
-            r.images.push(self.image(scroller, storey_image(storey.workspace, lit), 0, top)?);
-            r.images.push(self.image(scroller, decor_image(level % DECORS, lit), DECOR_AT.0, top + DECOR_AT.1)?);
-            r.storeys.push(storey.agents.iter().map(|a| a.id.clone()).collect());
+            r.images
+                .push(self.image(scroller, storey_image(storey.workspace, lit), 0, top)?);
+            r.images.push(self.image(
+                scroller,
+                decor_image(level % DECORS, lit),
+                DECOR_AT.0,
+                top + DECOR_AT.1,
+            )?);
+            r.storeys
+                .push(storey.agents.iter().map(|a| a.id.clone()).collect());
             if storey.agents.iter().any(|a| a.focused) {
                 focused = level;
             }
@@ -185,16 +207,29 @@ impl Panel {
                 let look = if agent.focused && agent.status == Status::Idle {
                     self.awake.as_ref()
                 } else {
-                    self.loops.iter().find(|(s, _)| *s == agent.status).map(|(_, l)| l)
+                    self.loops
+                        .iter()
+                        .find(|(s, _)| *s == agent.status)
+                        .map(|(_, l)| l)
                 };
                 if let Some(l) = look {
-                    r.sprites.push(self.looping(scroller, l, slot.mascot.0, top + slot.mascot.1)?);
+                    r.sprites.push(self.looping(
+                        scroller,
+                        l,
+                        slot.mascot.0,
+                        top + slot.mascot.1,
+                    )?);
                 }
                 if agent.focused
                     && let Some(l) = &self.plumbob
                 {
                     let (fx, fy) = slot.feet;
-                    r.sprites.push(self.looping(scroller, l, fx - PLUMBOB_W / 2, top + fy - PLUMBOB_ABOVE)?);
+                    r.sprites.push(self.looping(
+                        scroller,
+                        l,
+                        fx - PLUMBOB_W / 2,
+                        top + fy - PLUMBOB_ABOVE,
+                    )?);
                 }
             }
         }
@@ -220,13 +255,17 @@ impl Panel {
     /// Jumps the view to `scroll`, kept within the tower, and shows only the
     /// arrows that can still move it.
     fn scroll_to(&self, scroll: i32) {
-        let Some(scroller) = &self.scroller else { return };
+        let Some(scroller) = &self.scroller else {
+            return;
+        };
         scroller.scroll_to_y(scroll.clamp(0, self.offset), false);
         self.show_arrows();
     }
 
     fn show_arrows(&self) {
-        let Some(scroller) = &self.scroller else { return };
+        let Some(scroller) = &self.scroller else {
+            return;
+        };
         let scroll = scroller.get_scroll_y();
         for (arrow, visible) in [(&self.up, scroll > 0), (&self.down, scroll < self.offset)] {
             if let Some(a) = arrow {
@@ -241,14 +280,18 @@ impl Panel {
 
     /// Scrolls one storey up (`-1`) or down (`1`).
     fn step(&mut self, dir: i32) {
-        let Some(scroller) = &self.scroller else { return };
+        let Some(scroller) = &self.scroller else {
+            return;
+        };
         self.scroll_to(scroller.get_scroll_y() + dir * STOREY_H);
         self.manual_scroll = Some(Instant::now());
     }
 
     /// Puts storey `level`'s number on its shaft, the storey's top being `top`.
     fn number(&self, r: &mut Rendered, level: usize, top: i32) -> Result<(), WidgetError> {
-        let Some(scroller) = &self.scroller else { return Ok(()) };
+        let Some(scroller) = &self.scroller else {
+            return Ok(());
+        };
         let mut digits = [0usize; 3];
         let mut len = 0;
         let mut n = level;
@@ -262,7 +305,12 @@ impl Panel {
         }
         let (x, y) = NUMBER_AT[len - 1];
         for i in 0..len {
-            r.images.push(self.image(scroller, digit_image(digits[len - 1 - i]), x + DIGIT_W * i as i32, top + y)?);
+            r.images.push(self.image(
+                scroller,
+                digit_image(digits[len - 1 - i]),
+                x + DIGIT_W * i as i32,
+                top + y,
+            )?);
         }
         Ok(())
     }
@@ -289,12 +337,16 @@ impl Panel {
     /// scrolled lately.
     fn follow(&mut self) {
         let Some(level) = self.follow else { return };
-        if self.manual_scroll.is_some_and(|t| t.elapsed().as_secs() < MANUAL_SCROLL_HOLD_SECS) {
+        if self
+            .manual_scroll
+            .is_some_and(|t| t.elapsed().as_secs() < MANUAL_SCROLL_HOLD_SECS)
+        {
             return;
         }
         // Whole storeys from the bottom, so the arrows step along the same grid.
         let centre = self.offset + storey_top(level) + STOREY_H / 2;
-        let storeys_up = (self.offset - (centre - SCREEN_H / 2) + STOREY_H / 2).div_euclid(STOREY_H);
+        let storeys_up =
+            (self.offset - (centre - SCREEN_H / 2) + STOREY_H / 2).div_euclid(STOREY_H);
         self.scroll_to(self.offset - storeys_up * STOREY_H);
         self.follow = None;
     }
@@ -313,7 +365,11 @@ impl Panel {
         }
         let y = p.y + scroller.get_scroll_y() - self.offset;
         let (level, desk) = desk_under(p.x, y)?;
-        self.rendered.storeys.get(level.checked_sub(1)?)?.get(desk).cloned()
+        self.rendered
+            .storeys
+            .get(level.checked_sub(1)?)?
+            .get(desk)
+            .cloned()
     }
 }
 
@@ -339,9 +395,10 @@ impl View for Panel {
         self.car = Some(car);
         self.scroller = Some(scroller);
 
-        for (src, y, slot) in
-            [(arrow_up_image(), ARROW_UP_Y, &mut self.up), (arrow_down_image(), ARROW_DOWN_Y, &mut self.down)]
-        {
+        for (src, y, slot) in [
+            (arrow_up_image(), ARROW_UP_Y, &mut self.up),
+            (arrow_down_image(), ARROW_DOWN_Y, &mut self.down),
+        ] {
             let arrow = Image::new(container)?;
             arrow.set_src(src);
             arrow.pos(ARROW_X, y);
@@ -350,7 +407,13 @@ impl View for Panel {
             unsafe { oxivgl_sys::lv_obj_set_ext_click_area(arrow.handle(), ARROW_REACH) };
             *slot = Some(arrow);
         }
-        for h in [self.up.as_ref().map(|a| a.handle()), self.down.as_ref().map(|a| a.handle())].into_iter().flatten() {
+        for h in [
+            self.up.as_ref().map(|a| a.handle()),
+            self.down.as_ref().map(|a| a.handle()),
+        ]
+        .into_iter()
+        .flatten()
+        {
             register_event_on(self, h);
         }
 
@@ -370,7 +433,8 @@ impl View for Panel {
     fn on_event(&mut self, event: &Event) -> NavAction {
         let pressed = |w: &Option<Image<'static>>| {
             w.as_ref().is_some_and(|w| {
-                event.matches(w, EventCode::PRESSED) || event.matches(w, EventCode::LONG_PRESSED_REPEAT)
+                event.matches(w, EventCode::PRESSED)
+                    || event.matches(w, EventCode::LONG_PRESSED_REPEAT)
             })
         };
         if pressed(&self.up) {

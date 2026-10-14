@@ -44,7 +44,11 @@ pub struct Image {
 
 impl Image {
     pub fn new(w: usize, h: usize) -> Self {
-        Self { w, h, px: vec![[0; 4]; w * h] }
+        Self {
+            w,
+            h,
+            px: vec![[0; 4]; w * h],
+        }
     }
 
     pub fn get(&self, x: usize, y: usize) -> Rgba {
@@ -73,7 +77,9 @@ impl Image {
         } else {
             let oa = old[3] as f32 / 255.0;
             let out_a = a + oa * (1.0 - a);
-            let ch = |i: usize| ((c[i] as f32 * a + old[i] as f32 * oa * (1.0 - a)) / out_a).round() as u8;
+            let ch = |i: usize| {
+                ((c[i] as f32 * a + old[i] as f32 * oa * (1.0 - a)) / out_a).round() as u8
+            };
             [ch(0), ch(1), ch(2), (out_a * 255.0).round() as u8]
         };
         self.set(x, y, new);
@@ -120,9 +126,13 @@ impl Image {
 fn load(name: &str, bytes: &[u8]) -> Image {
     let mut decoder = png::Decoder::new(bytes);
     decoder.set_transformations(png::Transformations::normalize_to_color8());
-    let mut reader = decoder.read_info().unwrap_or_else(|e| panic!("{name}: {e}"));
+    let mut reader = decoder
+        .read_info()
+        .unwrap_or_else(|e| panic!("{name}: {e}"));
     let mut buf = vec![0; reader.output_buffer_size()];
-    let info = reader.next_frame(&mut buf).unwrap_or_else(|e| panic!("{name}: {e}"));
+    let info = reader
+        .next_frame(&mut buf)
+        .unwrap_or_else(|e| panic!("{name}: {e}"));
     let channels = info.color_type.samples();
     let mut img = Image::new(info.width as usize, info.height as usize);
     for (i, px) in buf[..info.buffer_size()].chunks(channels).enumerate() {
@@ -421,7 +431,10 @@ const MASCOT_FEET: (i32, i32) = (13, 21);
 /// monitor, high enough to see over the desk.
 pub fn slot(i: usize) -> Slot {
     let feet = (desk_centre(i) - 4, INNER - 4);
-    Slot { feet, mascot: (feet.0 - MASCOT_FEET.0, feet.1 - MASCOT_FEET.1) }
+    Slot {
+        feet,
+        mascot: (feet.0 - MASCOT_FEET.0, feet.1 - MASCOT_FEET.1),
+    }
 }
 
 /// The mascot's animation for an agent with `status`: its frames, cut from
@@ -444,16 +457,24 @@ pub fn awake_animation() -> (Vec<Image>, u32) {
 
 /// The frames of a mascot strip.
 fn frames(strip: Image) -> Vec<Image> {
-    (0..strip.w / MASCOT_W).map(|i| strip.crop(i * MASCOT_W, 0, MASCOT_W, MASCOT_H)).collect()
+    (0..strip.w / MASCOT_W)
+        .map(|i| strip.crop(i * MASCOT_W, 0, MASCOT_W, MASCOT_H))
+        .collect()
 }
 
 /// Every animation, for the tests.
 #[cfg(test)]
 fn all_animations() -> Vec<(&'static str, Vec<Image>)> {
-    let mut out: Vec<_> = [Status::Working, Status::Idle, Status::Blocked, Status::Done, Status::Unknown]
-        .into_iter()
-        .map(|s| (format!("{s:?}").leak() as &'static str, animation(s).0))
-        .collect();
+    let mut out: Vec<_> = [
+        Status::Working,
+        Status::Idle,
+        Status::Blocked,
+        Status::Done,
+        Status::Unknown,
+    ]
+    .into_iter()
+    .map(|s| (format!("{s:?}").leak() as &'static str, animation(s).0))
+    .collect();
     out.push(("awake", awake_animation().0));
     out
 }
@@ -509,7 +530,10 @@ mod tests {
         assert_eq!(car().h as i32, CAR_H);
         for k in 0..DECORS {
             let d = decor(k, true);
-            assert!(DECOR_AT.0 + d.w as i32 <= ROOMS_END + WALL && d.h as i32 <= INNER, "decor {k}");
+            assert!(
+                DECOR_AT.0 + d.w as i32 <= ROOMS_END + WALL && d.h as i32 <= INNER,
+                "decor {k}"
+            );
         }
     }
 
@@ -518,7 +542,10 @@ mod tests {
         let sheet = asset!("sprites.png");
         let all = Sprites::load().all();
         for (name, [x, y, w, h]) in all {
-            assert!(w > 0 && h > 0 && x + w <= sheet.w && y + h <= sheet.h, "{name} is outside sprites.png");
+            assert!(
+                w > 0 && h > 0 && x + w <= sheet.w && y + h <= sheet.h,
+                "{name} is outside sprites.png"
+            );
         }
         for (i, (a, [ax, ay, aw, ah])) in all.iter().enumerate() {
             for (b, [bx, by, bw, bh]) in &all[i + 1..] {
@@ -533,18 +560,29 @@ mod tests {
         let good = include_str!("../../assets/sprites.yaml");
         assert!(serde_saphyr::from_str::<Sprites>(good).is_ok());
         assert!(serde_saphyr::from_str::<Sprites>(&good.replace("plumbob:", "plumbbob:")).is_err());
-        let missing: String = good.lines().filter(|l| !l.starts_with("car:")).map(|l| format!("{l}\n")).collect();
+        let missing: String = good
+            .lines()
+            .filter(|l| !l.starts_with("car:"))
+            .map(|l| format!("{l}\n"))
+            .collect();
         assert!(serde_saphyr::from_str::<Sprites>(&missing).is_err());
     }
 
     #[test]
     fn backgrounds_are_opaque() {
-        for (name, img) in [("backdrop", backdrop()), ("street", street()), ("lobby", lobby())] {
+        for (name, img) in [
+            ("backdrop", backdrop()),
+            ("street", street()),
+            ("lobby", lobby()),
+        ] {
             assert!(img.px.iter().all(|p| p[3] == 0xff), "{name}");
         }
         for p in 0..WALLPAPERS {
             for lit in [true, false] {
-                assert!(storey(p, lit).px.iter().all(|p| p[3] == 0xff), "storey {p} lit {lit}");
+                assert!(
+                    storey(p, lit).px.iter().all(|p| p[3] == 0xff),
+                    "storey {p} lit {lit}"
+                );
             }
         }
     }
@@ -555,7 +593,10 @@ mod tests {
             let mut out = Vec::new();
             let mut enc = png::Encoder::new(&mut out, 1, 1);
             enc.set_color(png::ColorType::Rgb);
-            enc.write_header().unwrap().write_image_data(&[0xff, 0x7f, 0x01]).unwrap();
+            enc.write_header()
+                .unwrap()
+                .write_image_data(&[0xff, 0x7f, 0x01])
+                .unwrap();
             out
         });
         assert_eq!(img.px[0], [0xf8, 0x78, 0x00, 0xff]);
@@ -576,7 +617,10 @@ mod tests {
     fn desks_and_decor_fit_the_rooms_and_taps_find_desks() {
         for i in 0..DESKS_PER_STOREY {
             let (x, _) = desk_at(i);
-            assert!(x >= ROOMS_X && x + DESK_W as i32 <= ROOMS_END, "desk {i} at {x}");
+            assert!(
+                x >= ROOMS_X && x + DESK_W as i32 <= ROOMS_END,
+                "desk {i} at {x}"
+            );
             assert_eq!(((desk_centre(i) - DESKS_X) / DESK_SPACING) as usize, i);
         }
         assert!(DECOR_AT.0 >= desk_at(DESKS_PER_STOREY - 1).0 + DESK_W as i32);
@@ -593,7 +637,10 @@ mod tests {
             sprites.mascot_done,
             sprites.mascot_unknown,
         ] {
-            assert!(w >= MASCOT_W && w % MASCOT_W == 0 && h == MASCOT_H, "a mascot strip is {w}x{h}");
+            assert!(
+                w >= MASCOT_W && w % MASCOT_W == 0 && h == MASCOT_H,
+                "a mascot strip is {w}x{h}"
+            );
         }
         for (name, frames) in all_animations() {
             assert!(!frames.is_empty(), "{name}");
@@ -607,9 +654,17 @@ mod tests {
                 let (lo, hi) = drawn_columns(&m);
                 for i in 0..DESKS_PER_STOREY {
                     let x = slot(i).mascot.0;
-                    assert!(x + lo >= ROOMS_X && x + hi < ROOMS_END, "{s} at desk {i}: {}..{}", x + lo, x + hi);
+                    assert!(
+                        x + lo >= ROOMS_X && x + hi < ROOMS_END,
+                        "{s} at desk {i}: {}..{}",
+                        x + lo,
+                        x + hi
+                    );
                     if i > 0 {
-                        assert!(x + lo > slot(i - 1).mascot.0 + hi, "{s} at desk {i} overlaps its neighbour");
+                        assert!(
+                            x + lo > slot(i - 1).mascot.0 + hi,
+                            "{s} at desk {i} overlaps its neighbour"
+                        );
                     }
                 }
             }
@@ -643,7 +698,10 @@ mod tests {
     fn numbers_fit_the_shaft() {
         for len in 1..=2 {
             let (x, _) = number_at(len);
-            assert!(x >= SHAFT_X && x + 4 * len as i32 <= SHAFT_X + SHAFT_W, "{len} digits at {x}");
+            assert!(
+                x >= SHAFT_X && x + 4 * len as i32 <= SHAFT_X + SHAFT_W,
+                "{len} digits at {x}"
+            );
         }
         let d = digits();
         for i in 0..10 {
