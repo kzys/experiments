@@ -1,8 +1,8 @@
 # herdr-panel
 
 A small touch display (Freenove FNK0104N, ESP32-S3, 3.5" 320x480) that shows
-herdr as a tower in the style of SimTower, Tiny Tower and 16-bit console
-games: storeys of eight desks, one or more per workspace, and each agent as
+herdr as a pixel-art tower in the style of SimTower and Tiny Tower: storeys
+of eight desks, one or more per workspace, and each agent as
 the Claude Code mascot at a desk, animated by what the agent is doing. The
 elevator rides to the focused agent; arrow buttons over the shaft scroll a
 tall tower.
