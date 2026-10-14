@@ -56,18 +56,20 @@ fn main() {
     // herdr change events.
     let events = tx.clone();
     let events_herdr = Herdr::with_socket(herdr.socket().to_path_buf());
-    thread::spawn(move || loop {
-        match events_herdr.subscribe() {
-            Ok(lines) => {
-                for line in lines {
-                    if line.is_err() || events.send(Wake::Refresh).is_err() {
-                        break;
+    thread::spawn(move || {
+        loop {
+            match events_herdr.subscribe() {
+                Ok(lines) => {
+                    for line in lines {
+                        if line.is_err() || events.send(Wake::Refresh).is_err() {
+                            break;
+                        }
                     }
                 }
+                Err(e) => eprintln!("{e}"),
             }
-            Err(e) => eprintln!("{e}"),
+            thread::sleep(Duration::from_secs(1));
         }
-        thread::sleep(Duration::from_secs(1));
     });
 
     // Fallback poll.
@@ -80,15 +82,17 @@ fn main() {
 
     // The board.
     let board_writer = writer.clone();
-    thread::spawn(move || loop {
-        let error = panel::session(&port, &board_writer, |event| {
-            let _ = tx.send(match event {
-                panel::Event::Connected => Wake::BoardConnected,
-                panel::Event::Message(msg) => Wake::Board(msg),
+    thread::spawn(move || {
+        loop {
+            let error = panel::session(&port, &board_writer, |event| {
+                let _ = tx.send(match event {
+                    panel::Event::Connected => Wake::BoardConnected,
+                    panel::Event::Message(msg) => Wake::Board(msg),
+                });
             });
-        });
-        eprintln!("panel: {error}; retrying");
-        thread::sleep(Duration::from_secs(1));
+            eprintln!("panel: {error}; retrying");
+            thread::sleep(Duration::from_secs(1));
+        }
     });
 
     let mut last: Option<State> = None;

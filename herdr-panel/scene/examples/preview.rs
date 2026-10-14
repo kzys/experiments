@@ -8,22 +8,37 @@ use std::{env, fs::File, io::BufWriter};
 
 use herdr_panel_protocol::Status;
 use herdr_panel_scene::{
-    CAR_AT, DECOR_AT, DECORS, DESKS_PER_STOREY, GROUND_Y, PLUMBOB_ABOVE, SCALE, backdrop, behind_desk, car, decor, digits, lobby,
-    animation, number_at, plumbob, roof, roof_top, slot, storey, storey_top, street,
+    CAR_AT, DECOR_AT, DECORS, DESKS_PER_STOREY, GROUND_Y, PLUMBOB_ABOVE, SCALE, animation,
+    backdrop, behind_desk, car, decor, digits, lobby, number_at, plumbob, roof, roof_top, slot,
+    storey, storey_top, street,
 };
 
 fn main() {
     let args: Vec<String> = env::args().collect();
     let path = args.get(1).map_or("preview.png", String::as_str);
-    let workspaces: Vec<usize> = args.get(2).map_or("2,1,8", String::as_str).split(',').map(|s| s.parse().unwrap()).collect();
+    let workspaces: Vec<usize> = args
+        .get(2)
+        .map_or("2,1,8", String::as_str)
+        .split(',')
+        .map(|s| s.parse().unwrap())
+        .collect();
     let scroll: i32 = args.get(3).map_or(0, |s| s.parse().unwrap());
-    let statuses = [Status::Working, Status::Idle, Status::Blocked, Status::Done, Status::Idle, Status::Unknown];
+    let statuses = [
+        Status::Working,
+        Status::Idle,
+        Status::Blocked,
+        Status::Done,
+        Status::Idle,
+        Status::Unknown,
+    ];
 
     // Storeys: (wallpaper, behaviors of its agents), workspaces spilling over.
     let mut storeys: Vec<(usize, Vec<Status>)> = Vec::new();
     let mut n = 0;
     for (ws, &agents) in workspaces.iter().enumerate() {
-        let all: Vec<Status> = (0..agents).map(|i| statuses[(n + i) % statuses.len()]).collect();
+        let all: Vec<Status> = (0..agents)
+            .map(|i| statuses[(n + i) % statuses.len()])
+            .collect();
         n += agents;
         for chunk in all.chunks(DESKS_PER_STOREY) {
             storeys.push((ws, chunk.to_vec()));
@@ -49,7 +64,11 @@ fn main() {
         for (i, b) in agents.iter().enumerate() {
             let s = slot(i);
             let (frames, _) = animation(*b);
-            img.draw(&behind_desk(&frames[1 % frames.len()]), s.mascot.0, top + s.mascot.1);
+            img.draw(
+                &behind_desk(&frames[1 % frames.len()]),
+                s.mascot.0,
+                top + s.mascot.1,
+            );
             if k == 0 && i == 0 {
                 img.draw(&plumbob(), s.feet.0 - 2, top + s.feet.1 - PLUMBOB_ABOVE);
                 img.draw(&car(), CAR_AT.0, top + CAR_AT.1);
@@ -59,8 +78,15 @@ fn main() {
     img.draw(&roof()[0], 0, at(roof_top(storeys.len())));
 
     let img = img.scaled(SCALE, SCALE);
-    let mut enc = png::Encoder::new(BufWriter::new(File::create(path).unwrap()), img.w as u32, img.h as u32);
+    let mut enc = png::Encoder::new(
+        BufWriter::new(File::create(path).unwrap()),
+        img.w as u32,
+        img.h as u32,
+    );
     enc.set_color(png::ColorType::Rgba);
     enc.set_depth(png::BitDepth::Eight);
-    enc.write_header().unwrap().write_image_data(img.px.as_flattened()).unwrap();
+    enc.write_header()
+        .unwrap()
+        .write_image_data(img.px.as_flattened())
+        .unwrap();
 }

@@ -21,7 +21,9 @@ impl Writer {
         let text = state_lines(state)?;
         let mut port = self.0.lock().unwrap_or_else(|e| e.into_inner());
         let port = port.as_mut().ok_or("panel not connected")?;
-        port.write_all(text.as_bytes()).and_then(|()| port.flush()).map_err(|e| format!("panel write: {e}"))
+        port.write_all(text.as_bytes())
+            .and_then(|()| port.flush())
+            .map_err(|e| format!("panel write: {e}"))
     }
 
     fn set(&self, port: Option<Box<dyn SerialPort>>) {
@@ -58,7 +60,10 @@ pub fn parse_line(line: &str) -> Result<ToHost, &str> {
 /// `on_event`. Board log lines are printed to stderr. Returns the error that
 /// ended the session.
 pub fn session(path: &str, writer: &Writer, mut on_event: impl FnMut(Event)) -> String {
-    let mut port = match serialport::new(path, 115_200).timeout(Duration::from_millis(500)).open() {
+    let mut port = match serialport::new(path, 115_200)
+        .timeout(Duration::from_millis(500))
+        .open()
+    {
         Ok(p) => p,
         Err(e) => return format!("open {path}: {e}"),
     };
@@ -107,7 +112,12 @@ mod tests {
     #[test]
     fn json_lines_are_messages() {
         assert_eq!(parse_line("\"Hello\"\n"), Ok(ToHost::Hello));
-        assert_eq!(parse_line(r#"{"Focus":{"agent":"w1:p2"}}"#), Ok(ToHost::Focus { agent: truncated("w1:p2") }));
+        assert_eq!(
+            parse_line(r#"{"Focus":{"agent":"w1:p2"}}"#),
+            Ok(ToHost::Focus {
+                agent: truncated("w1:p2")
+            })
+        );
     }
 
     #[test]

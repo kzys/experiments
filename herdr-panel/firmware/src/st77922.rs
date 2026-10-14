@@ -36,7 +36,13 @@ impl St77922 {
         Self { spi, cs }
     }
 
-    async fn write(&mut self, reg: u32, data_mode: DataMode, cmd: u16, data: &[u8]) -> Result<(), Error> {
+    async fn write(
+        &mut self,
+        reg: u32,
+        data_mode: DataMode,
+        cmd: u16,
+        data: &[u8],
+    ) -> Result<(), Error> {
         self.cs.set_low();
         let r = self
             .spi
@@ -54,7 +60,8 @@ impl St77922 {
 
     /// Writes `data` to a panel register.
     pub async fn write_reg(&mut self, reg: u8, data: &[u8]) -> Result<(), Error> {
-        self.write(reg.into(), DataMode::Single, CMD_REG_WRITE, data).await
+        self.write(reg.into(), DataMode::Single, CMD_REG_WRITE, data)
+            .await
     }
 
     /// Runs the vendor init sequence.
@@ -69,11 +76,31 @@ impl St77922 {
     }
 
     /// Sends RGB565 pixels for the `w` x `h` window at (`x`, `y`).
-    pub async fn write_pixels(&mut self, x: u16, y: u16, w: u16, h: u16, data: &[u8]) -> Result<(), Error> {
-        let col = [(x >> 8) as u8, x as u8, ((x + w - 1) >> 8) as u8, (x + w - 1) as u8];
-        let row = [(y >> 8) as u8, y as u8, ((y + h - 1) >> 8) as u8, (y + h - 1) as u8];
-        self.write(REG_COLUMN, DataMode::Single, CMD_REG_WRITE, &col).await?;
-        self.write(REG_ROW, DataMode::Single, CMD_REG_WRITE, &row).await?;
-        self.write(REG_MEMORY_CONTINUE, DataMode::Quad, CMD_PIXEL_WRITE, data).await
+    pub async fn write_pixels(
+        &mut self,
+        x: u16,
+        y: u16,
+        w: u16,
+        h: u16,
+        data: &[u8],
+    ) -> Result<(), Error> {
+        let col = [
+            (x >> 8) as u8,
+            x as u8,
+            ((x + w - 1) >> 8) as u8,
+            (x + w - 1) as u8,
+        ];
+        let row = [
+            (y >> 8) as u8,
+            y as u8,
+            ((y + h - 1) >> 8) as u8,
+            (y + h - 1) as u8,
+        ];
+        self.write(REG_COLUMN, DataMode::Single, CMD_REG_WRITE, &col)
+            .await?;
+        self.write(REG_ROW, DataMode::Single, CMD_REG_WRITE, &row)
+            .await?;
+        self.write(REG_MEMORY_CONTINUE, DataMode::Quad, CMD_PIXEL_WRITE, data)
+            .await
     }
 }

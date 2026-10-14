@@ -6,7 +6,9 @@ use std::{
     path::PathBuf,
 };
 
-use herdr_panel_protocol::{Agent, ID_LEN, LABEL_LEN, State, Status, heapless::String as FixedString, truncated};
+use herdr_panel_protocol::{
+    Agent, ID_LEN, LABEL_LEN, State, Status, heapless::String as FixedString, truncated,
+};
 use serde_json::{Value, json};
 
 pub struct Herdr {
@@ -16,8 +18,11 @@ pub struct Herdr {
 impl Herdr {
     /// Uses `HERDR_SOCKET_PATH`, which herdr sets in every pane it manages.
     pub fn from_env() -> Result<Self, String> {
-        let socket = std::env::var_os("HERDR_SOCKET_PATH").ok_or("HERDR_SOCKET_PATH is not set; pass --socket")?;
-        Ok(Self { socket: socket.into() })
+        let socket = std::env::var_os("HERDR_SOCKET_PATH")
+            .ok_or("HERDR_SOCKET_PATH is not set; pass --socket")?;
+        Ok(Self {
+            socket: socket.into(),
+        })
     }
 
     pub fn with_socket(socket: PathBuf) -> Self {
@@ -29,13 +34,16 @@ impl Herdr {
     }
 
     fn connect(&self) -> Result<UnixStream, String> {
-        UnixStream::connect(&self.socket).map_err(|e| format!("herdr socket {}: {e}", self.socket.display()))
+        UnixStream::connect(&self.socket)
+            .map_err(|e| format!("herdr socket {}: {e}", self.socket.display()))
     }
 
     fn send(stream: &mut UnixStream, id: &str, method: &str, params: Value) -> Result<(), String> {
         let mut line = json!({"id": id, "method": method, "params": params}).to_string();
         line.push('\n');
-        stream.write_all(line.as_bytes()).map_err(|e| format!("herdr write: {e}"))
+        stream
+            .write_all(line.as_bytes())
+            .map_err(|e| format!("herdr write: {e}"))
     }
 
     /// Calls `method` and returns its `result`.
@@ -43,8 +51,11 @@ impl Herdr {
         let mut stream = self.connect()?;
         Self::send(&mut stream, "bridge", method, params)?;
         let mut line = String::new();
-        BufReader::new(stream).read_line(&mut line).map_err(|e| format!("herdr read: {e}"))?;
-        let mut response: Value = serde_json::from_str(&line).map_err(|e| format!("herdr response: {e}: {line}"))?;
+        BufReader::new(stream)
+            .read_line(&mut line)
+            .map_err(|e| format!("herdr read: {e}"))?;
+        let mut response: Value =
+            serde_json::from_str(&line).map_err(|e| format!("herdr response: {e}: {line}"))?;
         if let Some(error) = response.get("error") {
             return Err(format!("herdr {method}: {error}"));
         }
@@ -60,7 +71,8 @@ impl Herdr {
 
     /// Focuses the agent in pane `pane_id` (or an agent name).
     pub fn focus_agent(&self, target: &str) -> Result<(), String> {
-        self.call("agent.focus", json!({"target": target})).map(drop)
+        self.call("agent.focus", json!({"target": target}))
+            .map(drop)
     }
 
     /// Opens a connection that yields one line per layout change event.
@@ -84,7 +96,12 @@ impl Herdr {
             "pane.closed",
         ];
         let subscriptions: Vec<Value> = types.iter().map(|t| json!({"type": t})).collect();
-        Self::send(&mut stream, "events", "events.subscribe", json!({"subscriptions": subscriptions}))?;
+        Self::send(
+            &mut stream,
+            "events",
+            "events.subscribe",
+            json!({"subscriptions": subscriptions}),
+        )?;
         let mut lines = BufReader::new(stream).lines();
         // The first line acknowledges the subscription.
         match lines.next() {
@@ -115,17 +132,33 @@ fn str_of<const N: usize>(v: &Value) -> FixedString<N> {
 /// extras beyond the panel's capacity are dropped. The caption is the agent's
 /// name, or failing that its workspace's label.
 pub fn build_state(agents: &Value, workspaces: &Value) -> State {
-    let workspaces: Vec<&Value> = workspaces["workspaces"].as_array().into_iter().flatten().collect();
+    let workspaces: Vec<&Value> = workspaces["workspaces"]
+        .as_array()
+        .into_iter()
+        .flatten()
+        .collect();
     let number_of = |id: &Value| {
-        workspaces.iter().find(|w| &w["workspace_id"] == id).and_then(|w| w["number"].as_u64()).unwrap_or(u64::MAX)
+        workspaces
+            .iter()
+            .find(|w| &w["workspace_id"] == id)
+            .and_then(|w| w["number"].as_u64())
+            .unwrap_or(u64::MAX)
     };
     let mut agents: Vec<&Value> = agents["agents"].as_array().into_iter().flatten().collect();
-    agents.sort_by_key(|a| (number_of(&a["workspace_id"]), a["pane_id"].as_str().unwrap_or_default().to_string()));
+    agents.sort_by_key(|a| {
+        (
+            number_of(&a["workspace_id"]),
+            a["pane_id"].as_str().unwrap_or_default().to_string(),
+        )
+    });
 
     let mut state = State::default();
     for a in agents {
         let name = a["name"].as_str().filter(|n| !n.is_empty());
-        let workspace_label = workspaces.iter().find(|w| w["workspace_id"] == a["workspace_id"]).and_then(|w| w["label"].as_str());
+        let workspace_label = workspaces
+            .iter()
+            .find(|w| w["workspace_id"] == a["workspace_id"])
+            .and_then(|w| w["label"].as_str());
         let agent = Agent {
             id: str_of::<ID_LEN>(&a["pane_id"]),
             label: truncated::<LABEL_LEN>(name.or(workspace_label).unwrap_or_default()),
@@ -153,7 +186,10 @@ mod tests {
         {"agent":"codex","agent_status":"blocked","focused":false,"pane_id":"w2T:p4","tab_id":"w2T:t3","workspace_id":"w2T"}]}"#;
 
     fn state() -> State {
-        build_state(&serde_json::from_str(AGENTS).unwrap(), &serde_json::from_str(WORKSPACES).unwrap())
+        build_state(
+            &serde_json::from_str(AGENTS).unwrap(),
+            &serde_json::from_str(WORKSPACES).unwrap(),
+        )
     }
 
     #[test]
@@ -174,7 +210,10 @@ mod tests {
     fn status_and_focus_are_copied() {
         let state = state();
         let by_id = |id: &str| state.agents.iter().find(|a| a.id.as_str() == id).unwrap();
-        assert_eq!((by_id("w2V:p1").status, by_id("w2V:p1").focused), (Status::Working, true));
+        assert_eq!(
+            (by_id("w2V:p1").status, by_id("w2V:p1").focused),
+            (Status::Working, true)
+        );
         assert_eq!(by_id("w2T:p1").status, Status::Idle);
         assert_eq!(by_id("w2T:p4").status, Status::Blocked);
     }
