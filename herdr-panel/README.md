@@ -9,6 +9,10 @@ tall tower.
 Tapping a mascot focuses that agent in herdr. The board talks to a bridge on
 the laptop over USB serial.
 
+<img src="demo.png" width="320" alt="The tower at night: ten storeys of desks with mascots working, dozing, waving and hopping, an elevator on the left, and a lobby and street below">
+
+A mock-up of the screen, drawn by `art-tools/demo.py` (its `demo-3x.png`).
+
 ```
 herdr  <--Unix socket-->  bridge (laptop)  <--USB serial-->  firmware (board)
 ```
