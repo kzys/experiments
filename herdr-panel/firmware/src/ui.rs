@@ -1,118 +1,123 @@
-//! One card per herdr workspace, with a button for each of its tabs.
-//! Tapping a tab button asks the bridge to focus that tab.
+//! A grid of mascots, one per herdr agent, each looping the animation for its
+//! agent's state: running when it works, asleep when idle, waving with "!"
+//! when blocked, hopping when done, "?" when unknown. Tapping one asks the
+//! bridge to focus that agent.
 
 use core::fmt::Write;
 
 use alloc::vec::Vec;
-use herdr_panel_protocol::heapless::String;
-use herdr_panel_protocol::{Id, State, Status, ToHost};
+use herdr_panel_art::Behavior;
+use herdr_panel_protocol::{Id, State, Status, ToHost, heapless::String};
 use oxivgl::{
-    enums::{EventCode, ObjFlag},
+    anim::ANIM_REPEAT_INFINITE,
+    enums::EventCode,
     event::Event,
     fonts::MONTSERRAT_20,
     indev::PointerIndev,
-    layout::FlexFlow,
     style::{Selector, Style},
     view::{NavAction, View, register_event_on},
-    widgets::{Align, Button, Label, Obj, RADIUS_MAX, WidgetError},
+    widgets::{Align, AnimImg, AsLvHandle, Button, Label, Obj, Screen, WidgetError},
 };
 
-use crate::{link, touch::POINTER};
+use crate::{
+    frames::{Loop, loops},
+    link,
+    touch::POINTER,
+};
 
-const CARD_W: i32 = 304;
-const HEADER_H: i32 = 36;
-const TAB_W: i32 = 68;
-const TAB_H: i32 = 40;
-const TAB_GAP: i32 = 6;
-const TABS_PER_ROW: usize = 4;
+const SCREEN_W: i32 = 320;
+const COLUMNS: usize = 7;
+const CELL_W: i32 = 44;
+const CELL_H: i32 = 36;
+/// The area below the header, where the grid is centred.
+const AREA_TOP: i32 = 50;
+const AREA_H: i32 = 430;
 
-fn status_color(status: Status) -> u32 {
+fn behavior(status: Status) -> Behavior {
     match status {
-        Status::Working => 0xffb300,
-        Status::Idle => 0x43a047,
-        Status::Blocked => 0xe53935,
-        Status::Done => 0x1e88e5,
-        Status::Unknown => 0x607d8b,
+        Status::Working => Behavior::Work,
+        Status::Idle => Behavior::Sleep,
+        Status::Blocked => Behavior::Blocked,
+        Status::Done => Behavior::Done,
+        Status::Unknown => Behavior::Unknown,
     }
-}
-
-/// Black text on the light amber, white on the rest.
-fn text_color(status: Status) -> u32 {
-    if status == Status::Working { 0x000000 } else { 0xffffff }
 }
 
 /// The widgets built for one state. Widgets own their LVGL objects, and a
 /// parent deletes its children, so fields are in drop order: children first.
 #[derive(Default)]
 struct Rendered {
-    labels: Vec<Label<'static>>,
-    buttons: Vec<(Button<'static>, Id)>,
-    dots: Vec<Obj<'static>>,
-    cards: Vec<Obj<'static>>,
+    mascots: Vec<AnimImg<'static>>,
+    cells: Vec<(Button<'static>, Id)>,
 }
 
 pub struct Panel {
     indev: Option<PointerIndev>,
     title: Option<Label<'static>>,
-    status: Option<Label<'static>>,
-    list: Option<Obj<'static>>,
+    summary: Option<Label<'static>>,
     rendered: Rendered,
     focus: Option<Style>,
+    loops: Vec<(Behavior, Loop)>,
     shown: u32,
 }
 
 impl Panel {
     pub fn new() -> Self {
-        Self { indev: None, title: None, status: None, list: None, rendered: Rendered::default(), focus: None, shown: 0 }
+        Self {
+            indev: None,
+            title: None,
+            summary: None,
+            rendered: Rendered::default(),
+            focus: None,
+            loops: Vec::new(),
+            shown: 0,
+        }
     }
 
-    fn render(&mut self, state: &State) -> Result<(), WidgetError> {
+    fn render(&mut self, container: &impl AsLvHandle, state: &State) -> Result<(), WidgetError> {
         self.rendered = Rendered::default();
-        let (Some(list), Some(focus)) = (&self.list, &self.focus) else { return Ok(()) };
+        let Some(focus) = &self.focus else { return Ok(()) };
         let mut r = Rendered::default();
 
-        for ws in &state.workspaces {
-            let rows = ws.tabs.len().div_ceil(TABS_PER_ROW).max(1) as i32;
-            let card = Obj::new(list)?;
-            card.size(CARD_W, HEADER_H + rows * (TAB_H + TAB_GAP) + 4).bg_color(0x1c2733).bg_opa(255);
-            card.remove_flag(ObjFlag::SCROLLABLE);
-            if ws.focused {
-                card.add_style(focus, Selector::DEFAULT);
+        let n = state.agents.len();
+        let rows = n.div_ceil(COLUMNS) as i32;
+        let top = AREA_TOP + (AREA_H - rows * CELL_H) / 2;
+        for (i, agent) in state.agents.iter().enumerate() {
+            // Rows are centred on their own, so a short last row sits in the middle.
+            let row = i / COLUMNS;
+            let in_row = COLUMNS.min(n - row * COLUMNS) as i32;
+            let x = (SCREEN_W - in_row * CELL_W) / 2 + (i % COLUMNS) as i32 * CELL_W;
+            let y = top + row as i32 * CELL_H;
+
+            let cell = Button::new(container)?;
+            cell.size(CELL_W - 4, CELL_H - 4).pos(x, y).bg_opa(0).border_width(0);
+            cell.bubble_events();
+            if agent.focused {
+                cell.add_style(focus, Selector::DEFAULT);
             }
 
-            let dot = Obj::new(&card)?;
-            dot.size(16, 16).pos(8, 8).radius(RADIUS_MAX, Selector::DEFAULT);
-            dot.bg_color(status_color(ws.status)).bg_opa(255).border_width(0);
-            dot.remove_flag(ObjFlag::SCROLLABLE);
-            r.dots.push(dot);
-
-            let label = Label::new(&card)?;
-            label.text(ws.label.as_str()).text_color(0xffffff).pos(32, 8);
-            r.labels.push(label);
-
-            for (i, tab) in ws.tabs.iter().enumerate() {
-                let x = 8 + (i % TABS_PER_ROW) as i32 * (TAB_W + TAB_GAP);
-                let y = HEADER_H + (i / TABS_PER_ROW) as i32 * (TAB_H + TAB_GAP);
-                let btn = Button::new(&card)?;
-                btn.size(TAB_W, TAB_H).pos(x, y).bg_color(status_color(tab.status));
-                btn.bubble_events();
-                if tab.focused {
-                    btn.add_style(focus, Selector::DEFAULT);
-                }
-                let text = Label::new(&btn)?;
-                text.text(tab.label.as_str()).text_color(text_color(tab.status)).center();
-                r.labels.push(text);
-                r.buttons.push((btn, tab.id.clone()));
+            let mascot = AnimImg::new(&cell)?;
+            mascot.align(Align::Center, 0, 0);
+            if let Some((_, l)) = self.loops.iter().find(|(b, _)| *b == behavior(agent.status)) {
+                mascot.set_src(l.frames).set_duration(l.duration_ms).set_repeat_count(ANIM_REPEAT_INFINITE).start();
             }
-            r.cards.push(card);
+            r.mascots.push(mascot);
+            r.cells.push((cell, agent.id.clone()));
         }
         self.rendered = r;
         Ok(())
     }
 
-    fn set_status(&self, text: &str) {
-        if let Some(l) = &self.status {
-            l.text(text);
+    fn set_summary(&self, state: &State) {
+        let working = state.agents.iter().filter(|a| a.status == Status::Working).count();
+        let mut text = String::<40>::new();
+        if state.agents.is_empty() {
+            let _ = write!(text, "no agents");
+        } else {
+            let _ = write!(text, "{} agents, {} working", state.agents.len(), working);
+        }
+        if let Some(l) = &self.summary {
+            l.text(&text);
         }
     }
 }
@@ -120,46 +125,39 @@ impl Panel {
 impl View for Panel {
     fn create(&mut self, container: &Obj<'static>) -> Result<(), WidgetError> {
         self.indev = Some(PointerIndev::new(&POINTER)?);
+        self.loops = loops().into_iter().collect();
         container.bg_color(0x0b1117).bg_opa(255);
         self.focus = Some(Style::new(|s| {
-            s.border_width(3).border_color_hex(0xffffff);
+            s.border_width(2).border_color_hex(0xffffff).radius(10);
         }));
 
         let title = Label::new(container)?;
         title.text("herdr").text_font(MONTSERRAT_20).text_color(0xffffff).align(Align::TopLeft, 12, 10);
         self.title = Some(title);
 
-        let status = Label::new(container)?;
-        status.text("waiting for the bridge...").text_color(0x90a4ae).align(Align::TopRight, -12, 14);
-        self.status = Some(status);
-
-        let list = Obj::new(container)?;
-        list.size(320, 430).pos(0, 50).bg_opa(0).border_width(0);
-        list.style_pad_all(8, Selector::DEFAULT);
-        list.set_flex_flow(FlexFlow::Column);
-        list.style_pad_row(8, Selector::DEFAULT);
-        self.list = Some(list);
+        let summary = Label::new(container)?;
+        summary.text("waiting for the bridge...").text_color(0x90a4ae).align(Align::TopRight, -12, 14);
+        self.summary = Some(summary);
         Ok(())
     }
 
     fn update(&mut self) -> Result<NavAction, WidgetError> {
         let Some((version, state)) = link::newer_than(self.shown) else { return Ok(NavAction::None) };
         self.shown = version;
-        self.render(&state)?;
-        let handles: Vec<_> = self.rendered.buttons.iter().map(|(b, _)| b.handle()).collect();
+        let Some(screen) = Screen::active() else { return Ok(NavAction::None) };
+        self.render(&screen, &state)?;
+        let handles: Vec<_> = self.rendered.cells.iter().map(|(b, _)| b.handle()).collect();
         for h in handles {
             register_event_on(self, h);
         }
-        let mut text = String::<32>::new();
-        let _ = write!(text, "{} workspaces", state.workspaces.len());
-        self.set_status(&text);
+        self.set_summary(&state);
         Ok(NavAction::None)
     }
 
     fn on_event(&mut self, event: &Event) -> NavAction {
-        for (btn, id) in &self.rendered.buttons {
-            if event.matches(btn, EventCode::CLICKED) {
-                link::send(&ToHost::Focus { tab: id.clone() });
+        for (cell, id) in &self.rendered.cells {
+            if event.matches(cell, EventCode::CLICKED) {
+                link::send(&ToHost::Focus { agent: id.clone() });
             }
         }
         NavAction::None

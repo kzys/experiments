@@ -1,5 +1,5 @@
 [workspace]
-members = ["protocol", "bridge"]
+members = ["protocol", "art", "bridge"]
 # The firmware needs the Xtensa toolchain (`cargo +esp`) and its own target.
 exclude = ["firmware"]
 resolver = "2"

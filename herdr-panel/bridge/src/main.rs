@@ -95,8 +95,8 @@ fn main() {
     for wake in rx {
         match wake {
             Wake::BoardConnected | Wake::Board(ToHost::Hello) => last = None,
-            Wake::Board(ToHost::Focus { tab }) => match herdr.focus_tab(&tab) {
-                Ok(()) => eprintln!("focused {tab}"),
+            Wake::Board(ToHost::Focus { agent }) => match herdr.focus_agent(&agent) {
+                Ok(()) => eprintln!("focused {agent}"),
                 Err(e) => eprintln!("{e}"),
             },
             Wake::Refresh => {}
@@ -105,7 +105,7 @@ fn main() {
             Ok(state) if last.as_ref() != Some(&state) => {
                 match writer.send(&ToBoard::State(state.clone())) {
                     Ok(()) => {
-                        eprintln!("sent {} workspaces", state.workspaces.len());
+                        eprintln!("sent {} agents", state.agents.len());
                         last = Some(state);
                     }
                     // Not connected yet; the next wake-up retries.

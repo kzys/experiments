@@ -6,11 +6,7 @@ use std::{
     path::PathBuf,
 };
 
-use herdr_panel_protocol::{
-    ID_LEN, LABEL_LEN, State, Status, Tab, Workspace,
-    heapless::{self, String as FixedString},
-    truncated,
-};
+use herdr_panel_protocol::{Agent, ID_LEN, LABEL_LEN, State, Status, heapless::String as FixedString, truncated};
 use serde_json::{Value, json};
 
 pub struct Herdr {
@@ -55,15 +51,16 @@ impl Herdr {
         Ok(response["result"].take())
     }
 
-    /// The current workspaces and tabs.
+    /// The agents herdr currently knows about.
     pub fn state(&self) -> Result<State, String> {
+        let agents = self.call("agent.list", json!({}))?;
         let workspaces = self.call("workspace.list", json!({}))?;
-        let tabs = self.call("tab.list", json!({}))?;
-        Ok(build_state(&workspaces, &tabs))
+        Ok(build_state(&agents, &workspaces))
     }
 
-    pub fn focus_tab(&self, tab_id: &str) -> Result<(), String> {
-        self.call("tab.focus", json!({"tab_id": tab_id})).map(drop)
+    /// Focuses the agent in pane `pane_id` (or an agent name).
+    pub fn focus_agent(&self, target: &str) -> Result<(), String> {
+        self.call("agent.focus", json!({"target": target})).map(drop)
     }
 
     /// Opens a connection that yields one line per layout change event.
@@ -113,36 +110,29 @@ fn str_of<const N: usize>(v: &Value) -> FixedString<N> {
     truncated(v.as_str().unwrap_or_default())
 }
 
-/// Builds the panel's view from the `result` of `workspace.list` and `tab.list`.
-/// Workspaces and tabs keep herdr's `number` order; extras beyond the panel's
-/// capacity are dropped.
-pub fn build_state(workspaces: &Value, tabs: &Value) -> State {
-    let mut workspaces: Vec<&Value> = workspaces["workspaces"].as_array().into_iter().flatten().collect();
-    workspaces.sort_by_key(|w| w["number"].as_u64().unwrap_or(u64::MAX));
-    let mut tabs: Vec<&Value> = tabs["tabs"].as_array().into_iter().flatten().collect();
-    tabs.sort_by_key(|t| t["number"].as_u64().unwrap_or(u64::MAX));
+/// Builds the panel's view from the `result` of `agent.list` and
+/// `workspace.list`. Agents are ordered by workspace number, then pane id;
+/// extras beyond the panel's capacity are dropped. The caption is the agent's
+/// name, or failing that its workspace's label.
+pub fn build_state(agents: &Value, workspaces: &Value) -> State {
+    let workspaces: Vec<&Value> = workspaces["workspaces"].as_array().into_iter().flatten().collect();
+    let number_of = |id: &Value| {
+        workspaces.iter().find(|w| &w["workspace_id"] == id).and_then(|w| w["number"].as_u64()).unwrap_or(u64::MAX)
+    };
+    let mut agents: Vec<&Value> = agents["agents"].as_array().into_iter().flatten().collect();
+    agents.sort_by_key(|a| (number_of(&a["workspace_id"]), a["pane_id"].as_str().unwrap_or_default().to_string()));
 
     let mut state = State::default();
-    for w in workspaces {
-        let mut ws = Workspace {
-            id: str_of::<ID_LEN>(&w["workspace_id"]),
-            label: str_of::<LABEL_LEN>(&w["label"]),
-            status: status(&w["agent_status"]),
-            focused: w["focused"].as_bool().unwrap_or(false),
-            tabs: heapless::Vec::new(),
+    for a in agents {
+        let name = a["name"].as_str().filter(|n| !n.is_empty());
+        let workspace_label = workspaces.iter().find(|w| w["workspace_id"] == a["workspace_id"]).and_then(|w| w["label"].as_str());
+        let agent = Agent {
+            id: str_of::<ID_LEN>(&a["pane_id"]),
+            label: truncated::<LABEL_LEN>(name.or(workspace_label).unwrap_or_default()),
+            status: status(&a["agent_status"]),
+            focused: a["focused"].as_bool().unwrap_or(false),
         };
-        for t in tabs.iter().filter(|t| t["workspace_id"] == w["workspace_id"]) {
-            let tab = Tab {
-                id: str_of(&t["tab_id"]),
-                label: str_of(&t["label"]),
-                status: status(&t["agent_status"]),
-                focused: t["focused"].as_bool().unwrap_or(false),
-            };
-            if ws.tabs.push(tab).is_err() {
-                break;
-            }
-        }
-        if state.workspaces.push(ws).is_err() {
+        if state.agents.push(agent).is_err() {
             break;
         }
     }
@@ -154,50 +144,54 @@ mod tests {
     use super::*;
 
     const WORKSPACES: &str = r#"{"type":"workspace_list","workspaces":[
-        {"active_tab_id":"w2T:t3","agent_status":"idle","focused":false,"label":"statusline","number":2,"pane_count":3,"tab_count":2,"workspace_id":"w2T"},
-        {"active_tab_id":"w2S:t1","agent_status":"unknown","focused":false,"label":"~","number":1,"pane_count":1,"tab_count":1,"workspace_id":"w2S"},
-        {"active_tab_id":"w2V:t1","agent_status":"working","focused":true,"label":"herdr-panel","number":3,"pane_count":3,"tab_count":2,"workspace_id":"w2V"}]}"#;
-    const TABS: &str = r#"{"type":"tab_list","tabs":[
-        {"agent_status":"unknown","focused":false,"label":"1","number":1,"pane_count":1,"tab_id":"w2S:t1","workspace_id":"w2S"},
-        {"agent_status":"idle","focused":false,"label":"1","number":1,"pane_count":2,"tab_id":"w2T:t1","workspace_id":"w2T"},
-        {"agent_status":"unknown","focused":false,"label":"2","number":3,"pane_count":1,"tab_id":"w2T:t3","workspace_id":"w2T"},
-        {"agent_status":"working","focused":true,"label":"1","number":1,"pane_count":2,"tab_id":"w2V:t1","workspace_id":"w2V"},
-        {"agent_status":"unknown","focused":false,"label":"2","number":2,"pane_count":1,"tab_id":"w2V:t2","workspace_id":"w2V"}]}"#;
+        {"active_tab_id":"w2T:t3","agent_status":"idle","focused":false,"label":"statusline","number":2,"workspace_id":"w2T"},
+        {"active_tab_id":"w2S:t1","agent_status":"unknown","focused":false,"label":"~","number":1,"workspace_id":"w2S"},
+        {"active_tab_id":"w2V:t1","agent_status":"working","focused":true,"label":"herdr-panel","number":3,"workspace_id":"w2V"}]}"#;
+    const AGENTS: &str = r#"{"type":"agent_list","agents":[
+        {"agent":"claude","agent_status":"working","focused":true,"name":null,"pane_id":"w2V:p1","tab_id":"w2V:t1","workspace_id":"w2V"},
+        {"agent":"claude","agent_status":"idle","focused":false,"name":"reviewer","pane_id":"w2T:p1","tab_id":"w2T:t1","workspace_id":"w2T"},
+        {"agent":"codex","agent_status":"blocked","focused":false,"pane_id":"w2T:p4","tab_id":"w2T:t3","workspace_id":"w2T"}]}"#;
 
     fn state() -> State {
-        build_state(&serde_json::from_str(WORKSPACES).unwrap(), &serde_json::from_str(TABS).unwrap())
+        build_state(&serde_json::from_str(AGENTS).unwrap(), &serde_json::from_str(WORKSPACES).unwrap())
     }
 
     #[test]
-    fn workspaces_follow_herdr_numbers() {
+    fn agents_follow_workspace_order_then_pane_id() {
         let state = state();
-        let ids: Vec<&str> = state.workspaces.iter().map(|w| w.id.as_str()).collect();
-        assert_eq!(ids, ["w2S", "w2T", "w2V"]);
+        let ids: Vec<&str> = state.agents.iter().map(|a| a.id.as_str()).collect();
+        assert_eq!(ids, ["w2T:p1", "w2T:p4", "w2V:p1"]);
     }
 
     #[test]
-    fn tabs_are_grouped_under_their_workspace() {
+    fn caption_is_the_name_or_the_workspace_label() {
         let state = state();
-        let tabs = |i: usize| state.workspaces[i].tabs.iter().map(|t| t.id.as_str()).collect::<Vec<_>>();
-        assert_eq!(tabs(0), ["w2S:t1"]);
-        assert_eq!(tabs(1), ["w2T:t1", "w2T:t3"]);
-        assert_eq!(tabs(2), ["w2V:t1", "w2V:t2"]);
+        let labels: Vec<&str> = state.agents.iter().map(|a| a.label.as_str()).collect();
+        assert_eq!(labels, ["reviewer", "statusline", "herdr-panel"]);
     }
 
     #[test]
     fn status_and_focus_are_copied() {
         let state = state();
-        let w = &state.workspaces[2];
-        assert_eq!((w.status, w.focused), (Status::Working, true));
-        assert_eq!(w.tabs[0].status, Status::Working);
-        assert!(w.tabs[0].focused && !w.tabs[1].focused);
-        assert_eq!(state.workspaces[0].status, Status::Unknown);
+        let by_id = |id: &str| state.agents.iter().find(|a| a.id.as_str() == id).unwrap();
+        assert_eq!((by_id("w2V:p1").status, by_id("w2V:p1").focused), (Status::Working, true));
+        assert_eq!(by_id("w2T:p1").status, Status::Idle);
+        assert_eq!(by_id("w2T:p4").status, Status::Blocked);
     }
 
     #[test]
     fn unknown_status_strings_become_unknown() {
         assert_eq!(status(&json!("something-new")), Status::Unknown);
         assert_eq!(status(&json!(null)), Status::Unknown);
+    }
+
+    #[test]
+    fn extra_agents_are_dropped() {
+        let many: Vec<Value> = (0..20)
+            .map(|i| json!({"agent_status":"idle","focused":false,"pane_id":format!("w1:p{i}"),"workspace_id":"w1"}))
+            .collect();
+        let state = build_state(&json!({"agents": many}), &json!({}));
+        assert_eq!(state.agents.len(), herdr_panel_protocol::MAX_AGENTS);
     }
 
     #[test]

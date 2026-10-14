@@ -10,9 +10,8 @@ pub use heapless;
 use heapless::{String, Vec};
 use serde::{Deserialize, Serialize};
 
-/// Most workspaces and tabs per workspace the panel shows.
-pub const MAX_WORKSPACES: usize = 8;
-pub const MAX_TABS: usize = 6;
+/// Most agents the panel shows.
+pub const MAX_AGENTS: usize = 12;
 
 /// Longest label and id, in bytes.
 pub const LABEL_LEN: usize = 24;
@@ -20,12 +19,12 @@ pub const ID_LEN: usize = 16;
 
 /// Longest line either side sends, including the newline. Sized for a full
 /// [`ToBoard::State`].
-pub const MAX_LINE: usize = 8192;
+pub const MAX_LINE: usize = 4096;
 
 pub type Label = String<LABEL_LEN>;
 pub type Id = String<ID_LEN>;
 
-/// What herdr reports for a workspace or tab.
+/// What herdr reports for an agent.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
 pub enum Status {
@@ -36,27 +35,21 @@ pub enum Status {
     Unknown,
 }
 
+/// One agent running in a herdr pane.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
-pub struct Tab {
+pub struct Agent {
+    /// herdr's pane id, such as `w1:p2`. Also the focus target.
     pub id: Id,
+    /// Caption: the agent's name if it has one, else its workspace's label.
     pub label: Label,
     pub status: Status,
     pub focused: bool,
 }
 
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
-pub struct Workspace {
-    pub id: Id,
-    pub label: Label,
-    pub status: Status,
-    pub focused: bool,
-    pub tabs: Vec<Tab, MAX_TABS>,
-}
-
-/// The whole herdr layout, in display order.
+/// Every agent herdr knows about, in display order.
 #[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub struct State {
-    pub workspaces: Vec<Workspace, MAX_WORKSPACES>,
+    pub agents: Vec<Agent, MAX_AGENTS>,
 }
 
 /// Bridge to board.
@@ -70,8 +63,8 @@ pub enum ToBoard {
 pub enum ToHost {
     /// The board has started (or restarted) and wants the current state.
     Hello,
-    /// The user tapped a tab.
-    Focus { tab: Id },
+    /// The user tapped an agent.
+    Focus { agent: Id },
 }
 
 /// Copies `s` into a fixed-capacity string, cutting at a character boundary
@@ -93,20 +86,14 @@ mod tests {
     use super::*;
 
     fn sample() -> State {
-        let mut tabs = Vec::new();
-        tabs.push(Tab { id: truncated("w1:t1"), label: truncated("1"), status: Status::Working, focused: true })
+        let mut agents = Vec::new();
+        agents
+            .push(Agent { id: truncated("w1:p1"), label: truncated("herdr-panel"), status: Status::Working, focused: true })
             .unwrap();
-        let mut workspaces = Vec::new();
-        workspaces
-            .push(Workspace {
-                id: truncated("w1"),
-                label: truncated("herdr-panel"),
-                status: Status::Working,
-                focused: true,
-                tabs,
-            })
+        agents
+            .push(Agent { id: truncated("w2:p1"), label: truncated("dotfiles"), status: Status::Idle, focused: false })
             .unwrap();
-        State { workspaces }
+        State { agents }
     }
 
     #[test]
@@ -114,13 +101,13 @@ mod tests {
         let msg = ToBoard::State(sample());
         let json = serde_json::to_string(&msg).unwrap();
         assert_eq!(serde_json::from_str::<ToBoard>(&json).unwrap(), msg);
-        assert!(json.starts_with(r#"{"State":{"workspaces":[{"id":"w1""#), "{json}");
+        assert!(json.starts_with(r#"{"State":{"agents":[{"id":"w1:p1""#), "{json}");
     }
 
     #[test]
     fn host_messages_use_short_json() {
-        let focus = ToHost::Focus { tab: truncated("w1:t2") };
-        assert_eq!(serde_json::to_string(&focus).unwrap(), r#"{"Focus":{"tab":"w1:t2"}}"#);
+        let focus = ToHost::Focus { agent: truncated("w1:p2") };
+        assert_eq!(serde_json::to_string(&focus).unwrap(), r#"{"Focus":{"agent":"w1:p2"}}"#);
         assert_eq!(serde_json::to_string(&ToHost::Hello).unwrap(), r#""Hello""#);
     }
 
@@ -136,7 +123,7 @@ mod tests {
 
     #[test]
     fn bridge_parser_reads_the_board_output() {
-        for msg in [ToHost::Hello, ToHost::Focus { tab: truncated("w1:t2") }] {
+        for msg in [ToHost::Hello, ToHost::Focus { agent: truncated("w1:p2") }] {
             let mut buf = [0u8; 64];
             let n = serde_json_core::to_slice(&msg, &mut buf).unwrap();
             let json = core::str::from_utf8(&buf[..n]).unwrap();
@@ -153,25 +140,14 @@ mod tests {
     #[test]
     fn full_state_fits_in_a_line() {
         let mut state = State::default();
-        for w in 0..MAX_WORKSPACES {
-            let mut tabs = Vec::new();
-            for t in 0..MAX_TABS {
-                tabs.push(Tab {
-                    id: truncated("wXXXXXXXXXX:tNNNN"),
-                    label: truncated("a-long-tab-label-of-24-ch"),
-                    status: if t % 2 == 0 { Status::Unknown } else { Status::Blocked },
-                    focused: false,
-                })
-                .unwrap();
-            }
+        for i in 0..MAX_AGENTS {
             state
-                .workspaces
-                .push(Workspace {
-                    id: truncated("wXXXXXXXXXX"),
-                    label: truncated("a-long-workspace-label-ok"),
-                    status: Status::Unknown,
-                    focused: w == 0,
-                    tabs,
+                .agents
+                .push(Agent {
+                    id: truncated("wXXXXXXXXXX:pNNNN"),
+                    label: truncated("a-long-agent-label-of-24"),
+                    status: if i % 2 == 0 { Status::Unknown } else { Status::Blocked },
+                    focused: i == 0,
                 })
                 .unwrap();
         }

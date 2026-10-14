@@ -19,7 +19,7 @@ struct Shared {
 }
 
 static SHARED: Mutex<CriticalSectionRawMutex, RefCell<Shared>> =
-    Mutex::new(RefCell::new(Shared { version: 0, state: State { workspaces: Vec::new() } }));
+    Mutex::new(RefCell::new(Shared { version: 0, state: State { agents: Vec::new() } }));
 
 /// The latest state, if it is newer than `seen`.
 pub fn newer_than(seen: u32) -> Option<(u32, State)> {

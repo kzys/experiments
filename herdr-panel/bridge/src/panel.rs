@@ -91,7 +91,7 @@ mod tests {
     #[test]
     fn json_lines_are_messages() {
         assert_eq!(parse_line("\"Hello\"\n"), Ok(ToHost::Hello));
-        assert_eq!(parse_line(r#"{"Focus":{"tab":"w1:t2"}}"#), Ok(ToHost::Focus { tab: truncated("w1:t2") }));
+        assert_eq!(parse_line(r#"{"Focus":{"agent":"w1:p2"}}"#), Ok(ToHost::Focus { agent: truncated("w1:p2") }));
     }
 
     #[test]

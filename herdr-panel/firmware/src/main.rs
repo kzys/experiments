@@ -6,6 +6,7 @@
 
 extern crate alloc;
 
+mod frames;
 mod link;
 mod sched;
 mod st77922;
