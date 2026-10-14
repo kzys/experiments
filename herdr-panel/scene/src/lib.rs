@@ -1,5 +1,5 @@
-//! A tower seen from the side at night, in the style of a 16-bit console game,
-//! after tower-building games like SimTower and Tiny Tower: storeys of desks
+//! A pixel-art tower seen from the side at night, after tower-building games
+//! like SimTower and Tiny Tower: storeys of desks
 //! stacked on a lobby, one or more per herdr workspace, the Claude Code mascot
 //! at each desk, animated by what its agent is doing, and an elevator that
 //! rides to the focused agent.
