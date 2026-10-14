@@ -187,7 +187,7 @@ mod tests {
 
     #[test]
     fn extra_agents_are_dropped() {
-        let many: Vec<Value> = (0..20)
+        let many: Vec<Value> = (0..herdr_panel_protocol::MAX_AGENTS + 8)
             .map(|i| json!({"agent_status":"idle","focused":false,"pane_id":format!("w1:p{i}"),"workspace_id":"w1"}))
             .collect();
         let state = build_state(&json!({"agents": many}), &json!({}));

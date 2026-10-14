@@ -8,7 +8,7 @@ mod panel;
 use std::{path::PathBuf, sync::mpsc, thread, time::Duration};
 
 use herdr::Herdr;
-use herdr_panel_protocol::{State, ToBoard, ToHost};
+use herdr_panel_protocol::{State, ToHost};
 use panel::Writer;
 
 /// How often herdr is polled even without events, in case one is missed.
@@ -103,7 +103,7 @@ fn main() {
         }
         match herdr.state() {
             Ok(state) if last.as_ref() != Some(&state) => {
-                match writer.send(&ToBoard::State(state.clone())) {
+                match writer.send_state(&state) {
                     Ok(()) => {
                         eprintln!("sent {} agents", state.agents.len());
                         last = Some(state);

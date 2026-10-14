@@ -1,6 +1,7 @@
 //! Links the ESP-HAL linker script and turns the art into LVGL images: the
-//! tower's background, storeys, roof, desk and elevator from the scene crate,
-//! and each mascot frame from the art crate, are written as PNGs, converted with LVGL's `LVGLImage.py`
+//! tower's backdrop, street, lobby, storeys, digits, roof and elevator from
+//! the scene crate, and each mascot frame from the art crate (cut where its
+//! desk hides it), are written as PNGs, converted with LVGL's `LVGLImage.py`
 //! (needs Python with `pypng` and `lz4`) into `lv_image_dsc_t`s, and compiled
 //! in. `frames.rs`, included by the firmware, declares them, lists each
 //! animation's frames and says where everything goes.
@@ -16,8 +17,8 @@ use std::{
 
 use herdr_panel_art::{Behavior, Ink, cycle, frame};
 use herdr_panel_scene::{
-    DESKS_PER_FLOOR, Image, MAX_FLOORS, SCALE, background, car, car_pos, desk, floor, floor_pos, mascot, plumbob, roof,
-    roof_pos, slot,
+    ARROW_X, CAR_AT, DESK_SPACING, DESKS_PER_STOREY, DESKS_X, GROUND_Y, Image, PLUMBOB_ABOVE, ROOF_H, SCALE, STOREY_H, WALLPAPERS,
+    arrow, backdrop, behind_desk, car, digits, lobby, mascot, number_at, plumbob, roof, slot, storey, street,
 };
 use oxivgl_build::ImageConfig;
 
@@ -32,7 +33,7 @@ const ANIMATIONS: [(Behavior, &str); 5] = [
 
 fn color(ink: Ink) -> [u8; 4] {
     match ink {
-        Ink::Body => [0xd9, 0x77, 0x57, 0xff],
+        Ink::Body | Ink::Lid => [0xd9, 0x77, 0x57, 0xff],
         Ink::Zzz => [0x29, 0xad, 0xff, 0xff],
         Ink::Alert => [0xff, 0x00, 0x4d, 0xff],
         Ink::Spark => [0xff, 0xec, 0x27, 0xff],
@@ -92,7 +93,7 @@ fn main() {
         for i in 0..c.frames {
             let symbol = format!("mascot_{name}_{i}");
             let png = out.join(format!("{symbol}.png"));
-            write_png(&png, &mascot(&frame(behavior, 0, i * c.tick_step), color), true);
+            write_png(&png, &behind_desk(&mascot(&frame(behavior, 0, i * c.tick_step), color)), true);
             convert(&cfg, &out, &symbol, &png, "ARGB8888");
             writeln!(declarations, "oxivgl::image_declare!({symbol});").unwrap();
             write!(pointers, "{symbol}() as *const _ as *const core::ffi::c_void, ").unwrap();
@@ -125,16 +126,24 @@ fn main() {
         convert(&cfg, &out, symbol, &png, if alpha { "ARGB8888" } else { "RGB565" });
         writeln!(declarations, "oxivgl::image_declare!({symbol});").unwrap();
     };
-    image("tower", &background(), false);
-    image("desk", &desk(), true);
+    image("backdrop", &backdrop(), false);
+    image("street", &street(), false);
+    image("lobby", &lobby(), false);
     image("car", &car(), true);
-    let mut floors = String::new();
-    for level in 1..=MAX_FLOORS {
+    image("arrow_up", &arrow(true), true);
+    image("arrow_down", &arrow(false), true);
+    let mut storeys = String::new();
+    for paper in 0..WALLPAPERS {
         for lit in [false, true] {
-            let symbol = format!("floor_{level}_{}", if lit { "lit" } else { "dark" });
-            image(&symbol, &floor(level, lit), false);
-            writeln!(floors, "        ({level}, {lit}) => {symbol}(),").unwrap();
+            let symbol = format!("storey_{paper}_{}", if lit { "lit" } else { "dark" });
+            image(&symbol, &storey(paper, lit), false);
+            writeln!(storeys, "        ({paper}, {lit}) => {symbol}(),").unwrap();
         }
+    }
+    let mut digit_arms = String::new();
+    for (d, img) in digits().iter().enumerate() {
+        image(&format!("digit_{d}"), img, true);
+        writeln!(digit_arms, "        {d} => digit_{d}(),").unwrap();
     }
     let mut roof_frames = String::new();
     for (i, img) in roof().iter().enumerate() {
@@ -145,19 +154,15 @@ fn main() {
 
     let scale = SCALE as i32;
     let at = |(x, y): (i32, i32)| format!("({}, {})", x * scale, y * scale);
-    let levels = 0..=MAX_FLOORS;
-    let floor_pos: Vec<String> = levels.clone().map(|l| at(floor_pos(l))).collect();
-    let roof_pos: Vec<String> = levels.clone().map(|l| at(roof_pos(l))).collect();
-    let car_pos: Vec<String> = levels.map(|l| at(car_pos(l))).collect();
     let mut slots = String::new();
-    for level in 1..=MAX_FLOORS {
-        slots.push_str("    [\n");
-        for i in 0..DESKS_PER_FLOOR {
-            let s = slot(level, i);
-            writeln!(slots, "        Slot {{ feet: {}, mascot: {}, desk: {} }},", at(s.feet), at(s.mascot), at(s.desk)).unwrap();
-        }
-        slots.push_str("    ],\n");
+    for i in 0..DESKS_PER_STOREY {
+        let s = slot(i);
+        writeln!(slots, "    Slot {{ feet: {}, mascot: {} }},", at(s.feet), at(s.mascot)).unwrap();
     }
+    let number_at: Vec<String> = (1..=3).map(|len| at(number_at(len))).collect();
+    let image_fn = |name: &str, doc: &str| {
+        format!("/// {doc}\npub fn {name}_image() -> &'static oxivgl::widgets::lv_image_dsc_t {{ {name}() }}\n\n")
+    };
     let source = format!(
         "{declarations}\n\
          /// The animation for each behavior. Call once: it leaks the frame lists, which\n\
@@ -167,31 +172,51 @@ fn main() {
          pub fn plumbob() -> Loop {{\n    Loop {{ frames: Box::leak(Box::new([{pointers}])), duration_ms: 1200 }}\n}}\n\n\
          /// The roof, its antenna light blinking. Call once, like [`loops`].\n\
          pub fn roof() -> Loop {{\n    Loop {{ frames: Box::leak(Box::new([{roof_frames}])), duration_ms: 1600 }}\n}}\n\n\
-         /// The sky, the street and the lobby, filling the screen.\n\
-         pub fn tower_image() -> &'static oxivgl::widgets::lv_image_dsc_t {{ tower() }}\n\n\
-         /// A desk, drawn over the agent standing behind it.\n\
-         pub fn desk_image() -> &'static oxivgl::widgets::lv_image_dsc_t {{ desk() }}\n\n\
-         /// The elevator car.\n\
-         pub fn car_image() -> &'static oxivgl::widgets::lv_image_dsc_t {{ car() }}\n\n\
-         /// Storey `level` (1..=[`MAX_FLOORS`]), with its lights on or off.\n\
-         pub fn floor_image(level: usize, lit: bool) -> &'static oxivgl::widgets::lv_image_dsc_t {{\n\
-         \x20   match (level.clamp(1, MAX_FLOORS), lit) {{\n{floors}        _ => unreachable!(),\n    }}\n}}\n\n\
-         /// Storeys that fit above the lobby, and desks on each.\n\
-         pub const MAX_FLOORS: usize = {MAX_FLOORS};\n\
-         pub const DESKS_PER_FLOOR: usize = {DESKS_PER_FLOOR};\n\n\
-         /// Top left of storey `level`, by level (0 is the lobby).\n\
-         pub const FLOOR_POS: [(i32, i32); {m}] = [{floor_pos}];\n\n\
-         /// Top left of the roof over a tower with that many storeys above the lobby.\n\
-         pub const ROOF_POS: [(i32, i32); {m}] = [{roof_pos}];\n\n\
-         /// Top left of the elevator car when it stops at each level.\n\
-         pub const CAR_POS: [(i32, i32); {m}] = [{car_pos}];\n\n\
-         /// The desks on storeys 1..=[`MAX_FLOORS`], left to right.\n\
-         pub const SLOTS: [[Slot; {DESKS_PER_FLOOR}]; {MAX_FLOORS}] = [\n{slots}];\n",
+         {backdrop}{street}{lobby}{car}{arrow_up}{arrow_down}\
+         /// A storey in wallpaper `paper` (modulo [`WALLPAPERS`]), its lights on or off.\n\
+         pub fn storey_image(paper: usize, lit: bool) -> &'static oxivgl::widgets::lv_image_dsc_t {{\n\
+         \x20   match (paper % WALLPAPERS, lit) {{\n{storeys}        _ => unreachable!(),\n    }}\n}}\n\n\
+         /// Digit `d` (modulo 10) of a storey number.\n\
+         pub fn digit_image(d: usize) -> &'static oxivgl::widgets::lv_image_dsc_t {{\n\
+         \x20   match d % 10 {{\n{digit_arms}        _ => unreachable!(),\n    }}\n}}\n\n\
+         /// Layout, in screen pixels, with the view scrolled to the bottom: y\n\
+         /// grows downwards from the top of the screen, so storeys high up have\n\
+         /// negative tops.\n\
+         pub const GROUND_Y: i32 = {ground};\n\
+         pub const STOREY_H: i32 = {storey_h};\n\
+         pub const ROOF_H: i32 = {roof_h};\n\
+         pub const WALLPAPERS: usize = {WALLPAPERS};\n\
+         pub const DESKS_PER_STOREY: usize = {DESKS_PER_STOREY};\n\
+         /// Where desks start in a storey, and how far apart they are.\n\
+         pub const DESKS_X: i32 = {desks_x};\n\
+         pub const DESK_SPACING: i32 = {desk_spacing};\n\
+         /// Where the car stops in a storey, relative to the storey.\n\
+         pub const CAR_AT: (i32, i32) = {car_at};\n\
+         /// The left edge of the scroll buttons, over the shaft.\n\
+         pub const ARROW_X: i32 = {arrow_x};\n\
+         /// How far the plumbob's top is above the agent's feet.\n\
+         pub const PLUMBOB_ABOVE: i32 = {plumbob_above};\n\
+         /// Where a storey number's first digit goes, for numbers of 1 to 3\n\
+         /// digits; each digit is 8 pixels wide.\n\
+         pub const NUMBER_AT: [(i32, i32); 3] = [{number_at}];\n\
+         /// Where the agents at each desk go, relative to the storey.\n\
+         pub const SLOTS: [Slot; {DESKS_PER_STOREY}] = [\n{slots}];\n",
         n = ANIMATIONS.len(),
-        m = MAX_FLOORS + 1,
-        floor_pos = floor_pos.join(", "),
-        roof_pos = roof_pos.join(", "),
-        car_pos = car_pos.join(", "),
+        backdrop = image_fn("backdrop", "The sky and the city, filling the screen; it stays still."),
+        street = image_fn("street", "The street, from `GROUND_Y` to the bottom of the screen."),
+        lobby = image_fn("lobby", "The lobby, storey 0."),
+        car = image_fn("car", "The elevator car."),
+        arrow_up = image_fn("arrow_up", "The button that scrolls up a storey."),
+        arrow_down = image_fn("arrow_down", "The button that scrolls down a storey."),
+        arrow_x = ARROW_X * scale,
+        ground = GROUND_Y * scale,
+        storey_h = STOREY_H as i32 * scale,
+        roof_h = ROOF_H as i32 * scale,
+        desks_x = DESKS_X * scale,
+        desk_spacing = DESK_SPACING * scale,
+        car_at = at(CAR_AT),
+        plumbob_above = PLUMBOB_ABOVE * scale,
+        number_at = number_at.join(", "),
     );
     fs::write(out.join("frames.rs"), source).unwrap();
 }

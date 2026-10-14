@@ -42,6 +42,9 @@ use static_cell::{StaticCell, make_static};
 esp_bootloader_esp_idf::esp_app_desc!();
 
 const LVGL_BUF_BYTES: usize = SCREEN_W as usize * COLOR_BUF_LINES * 2;
+/// PSRAM given to LVGL on top of its small internal pool: a tall tower has
+/// hundreds of widgets. At most `LV_MEM_POOL_EXPAND_SIZE` in `lv_conf.h`.
+const LVGL_PSRAM_POOL: usize = 512 * 1024;
 
 struct DisplayDriver {
     display: St77922,
@@ -131,6 +134,14 @@ async fn main(spawner: Spawner) {
     let p = esp_hal::init(esp_hal::Config::default().with_cpu_clock(esp_hal::clock::CpuClock::max()));
     esp_println::logger::init_logger_from_env();
     esp_alloc::heap_allocator!(size: 64 * 1024);
+
+    let psram = esp_hal::psram::Psram::new(p.PSRAM, esp_hal::psram::PsramConfig::default());
+    let (start, size) = psram.raw_parts();
+    // SAFETY: PSRAM stays mapped for the program's life, and only LVGL uses it.
+    let pool = unsafe {
+        core::slice::from_raw_parts_mut(start as *mut core::mem::MaybeUninit<u8>, size.min(LVGL_PSRAM_POOL))
+    };
+    oxivgl::mem::reserve_pool(pool).expect("LVGL PSRAM pool");
 
     let timg0 = TimerGroup::new(p.TIMG0);
     esp_rtos::start(timg0.timer0, p.FROM_CPU_INTR0);

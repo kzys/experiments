@@ -29,6 +29,8 @@ pub enum Ink {
     Alert,
     Spark,
     Question,
+    /// A drowsy eye: the upper half of the pixel is body, the lower half open.
+    Lid,
 }
 
 pub type Grid = [[Option<Ink>; CANVAS_W]; CANVAS_H];
@@ -38,7 +40,7 @@ pub type Grid = [[Option<Ink>; CANVAS_W]; CANVAS_H];
 pub enum Behavior {
     /// Busy: running on the spot, arms swinging.
     Work,
-    /// Asleep, with zzz rising.
+    /// Asleep, eyes drowsy, with zzz rising.
     Sleep,
     /// Idle and awake: looks around, blinks, hops and waves at random.
     Play,
@@ -110,6 +112,8 @@ enum Eyes {
     Left,
     Right,
     Closed,
+    /// Forward, but half shut.
+    Drowsy,
 }
 
 #[derive(Clone, Copy, PartialEq, Eq)]
@@ -159,7 +163,7 @@ impl Pose {
             Eyes::Forward => EYES_FORWARD,
             Eyes::Left => EYES_LEFT,
             Eyes::Right => EYES_RIGHT,
-            Eyes::Closed => [usize::MAX; 2],
+            Eyes::Closed | Eyes::Drowsy => [usize::MAX; 2],
         }
         .into_iter()
         .filter(|&x| x != usize::MAX)
@@ -168,7 +172,8 @@ impl Pose {
     }
 }
 
-/// Puts the mascot, lifted by `lift` rows, on the grid.
+/// Puts the mascot, lifted by `lift` rows, on the grid. Drowsy eyes are
+/// [`Ink::Lid`] pixels.
 fn draw_mascot(grid: &mut Grid, pose: Pose) {
     let sprite = pose.sprite();
     for (y, row) in sprite.iter().enumerate() {
@@ -176,6 +181,11 @@ fn draw_mascot(grid: &mut Grid, pose: Pose) {
             if on {
                 grid[ORIGIN.1 + y - pose.lift][ORIGIN.0 + x] = Some(Ink::Body);
             }
+        }
+    }
+    if pose.eyes == Eyes::Drowsy {
+        for x in EYES_FORWARD {
+            grid[ORIGIN.1 + EYE_ROW - pose.lift][ORIGIN.0 + x] = Some(Ink::Lid);
         }
     }
 }
@@ -251,7 +261,7 @@ pub fn frame(behavior: Behavior, seed: u32, tick: u32) -> Grid {
             draw_mascot(&mut grid, pose);
         }
         Behavior::Sleep => {
-            draw_mascot(&mut grid, Pose { eyes: Eyes::Closed, ..Pose::REST });
+            draw_mascot(&mut grid, Pose { eyes: Eyes::Drowsy, ..Pose::REST });
             // zzz rises in four steps: one z, then two, then both stay, then none.
             let step = (tick / 4) % 4;
             if step >= 1 {
@@ -343,6 +353,7 @@ mod tests {
                         Some(Ink::Alert) => '!',
                         Some(Ink::Spark) => '*',
                         Some(Ink::Question) => '?',
+                        Some(Ink::Lid) => '-',
                     })
                     .collect()
             })
@@ -379,12 +390,14 @@ mod tests {
     }
 
     #[test]
-    fn sleeping_shows_eyes_closed_and_zzz() {
+    fn sleeping_shows_drowsy_eyes_and_zzz() {
         let frames: Vec<Vec<String>> = (0..16).map(|t| picture(&frame(Behavior::Sleep, 0, t))).collect();
         assert!(frames.iter().any(|f| f.iter().any(|r| r.contains('z'))), "no zzz");
         assert!(frames[0].iter().all(|r| !r.contains('z')), "zzz should start hidden");
-        // Eyes closed: the face row is solid between the cheeks.
-        assert_eq!(&frames[0][ORIGIN.1 + 1][ORIGIN.0 + 3..ORIGIN.0 + 15], "############");
+        // Drowsy: both eyes half shut, in every frame.
+        for f in &frames {
+            assert_eq!(&f[ORIGIN.1 + 1][ORIGIN.0 + 3..ORIGIN.0 + 15], "##-######-##");
+        }
     }
 
     #[test]

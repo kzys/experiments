@@ -6,7 +6,7 @@ use std::{
     time::Duration,
 };
 
-use herdr_panel_protocol::{ToBoard, ToHost};
+use herdr_panel_protocol::{State, ToHost, messages};
 use serialport::SerialPort;
 
 /// Writing side of the port, shared with the reader thread, which replaces it
@@ -15,18 +15,28 @@ use serialport::SerialPort;
 pub struct Writer(Arc<Mutex<Option<Box<dyn SerialPort>>>>);
 
 impl Writer {
-    /// Sends one message. Fails while the board is not connected.
-    pub fn send(&self, msg: &ToBoard) -> Result<(), String> {
-        let mut line = serde_json::to_string(msg).map_err(|e| e.to_string())?;
-        line.push('\n');
+    /// Sends `state`, one message per line, in one write. Fails while the
+    /// board is not connected.
+    pub fn send_state(&self, state: &State) -> Result<(), String> {
+        let text = state_lines(state)?;
         let mut port = self.0.lock().unwrap_or_else(|e| e.into_inner());
         let port = port.as_mut().ok_or("panel not connected")?;
-        port.write_all(line.as_bytes()).and_then(|()| port.flush()).map_err(|e| format!("panel write: {e}"))
+        port.write_all(text.as_bytes()).and_then(|()| port.flush()).map_err(|e| format!("panel write: {e}"))
     }
 
     fn set(&self, port: Option<Box<dyn SerialPort>>) {
         *self.0.lock().unwrap_or_else(|e| e.into_inner()) = port;
     }
+}
+
+/// The lines that send `state` to the board.
+fn state_lines(state: &State) -> Result<String, String> {
+    let mut text = String::new();
+    for msg in messages(state) {
+        text.push_str(&serde_json::to_string(&msg).map_err(|e| e.to_string())?);
+        text.push('\n');
+    }
+    Ok(text)
 }
 
 /// What the reader thread reports.
@@ -87,6 +97,12 @@ mod tests {
     use herdr_panel_protocol::truncated;
 
     use super::*;
+
+    #[test]
+    fn a_state_is_one_line_per_message() {
+        let text = state_lines(&State::default()).unwrap();
+        assert_eq!(text, "{\"Begin\":{\"count\":0}}\n\"End\"\n");
+    }
 
     #[test]
     fn json_lines_are_messages() {

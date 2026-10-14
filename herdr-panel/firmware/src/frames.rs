@@ -1,5 +1,5 @@
-//! The images and desk positions, converted from the art and scene crates at
-//! build time. Positions are in screen pixels.
+//! The images and layout, converted from the art and scene crates at build
+//! time. Positions are in screen pixels.
 
 use alloc::boxed::Box;
 
@@ -13,14 +13,12 @@ pub struct Loop {
     pub duration_ms: u32,
 }
 
-/// Where one agent works.
+/// Where one agent works, relative to its storey.
 pub struct Slot {
     /// The point between the agent's feet.
     pub feet: (i32, i32),
     /// Where the mascot image's top left corner goes.
     pub mascot: (i32, i32),
-    /// Where the desk image's top left corner goes.
-    pub desk: (i32, i32),
 }
 
 include!(concat!(env!("OUT_DIR"), "/frames.rs"));

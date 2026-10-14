@@ -9,7 +9,7 @@ use core::cell::RefCell;
 use embassy_sync::blocking_mutex::{Mutex, raw::CriticalSectionRawMutex};
 use embassy_time::{Instant, Timer};
 use esp_hal::{Blocking, usb::usb_serial_jtag::UsbSerialJtagRx};
-use herdr_panel_protocol::{MAX_LINE, State, ToBoard, ToHost};
+use herdr_panel_protocol::{Assembler, MAX_LINE, State, ToBoard, ToHost};
 use herdr_panel_protocol::heapless::Vec;
 
 struct Shared {
@@ -21,11 +21,20 @@ struct Shared {
 static SHARED: Mutex<CriticalSectionRawMutex, RefCell<Shared>> =
     Mutex::new(RefCell::new(Shared { version: 0, state: State { agents: Vec::new() } }));
 
-/// The latest state, if it is newer than `seen`.
-pub fn newer_than(seen: u32) -> Option<(u32, State)> {
+/// Copies the latest state into `out` if it is newer than `seen`, and returns
+/// its version. Copies agent by agent: a whole state is too big for the stack.
+pub fn newer_into(seen: u32, out: &mut State) -> Option<u32> {
     SHARED.lock(|s| {
         let s = s.borrow();
-        (s.version != seen).then(|| (s.version, s.state.clone()))
+        if s.version == seen {
+            return None;
+        }
+        out.agents.clear();
+        for agent in &s.state.agents {
+            // Both have the same capacity.
+            let _ = out.agents.push(agent.clone());
+        }
+        Some(s.version)
     })
 }
 
@@ -41,17 +50,23 @@ pub fn send(msg: &ToHost) {
     }
 }
 
-/// Handles one complete line from the bridge.
-fn handle_line(line: &[u8]) {
-    if line.first() != Some(&b'{') {
+/// Handles one complete line from the bridge, publishing the state once the
+/// assembler has all of it. The finished state is swapped in, not copied:
+/// it is too big to move around on the stack.
+fn handle_line(line: &[u8], assembler: &mut Assembler) {
+    if line.first() != Some(&b'{') && line.first() != Some(&b'"') {
         return;
     }
     match serde_json_core::from_slice::<ToBoard>(line) {
-        Ok((ToBoard::State(state), _)) => SHARED.lock(|s| {
-            let mut s = s.borrow_mut();
-            s.state = state;
-            s.version = s.version.wrapping_add(1).max(1);
-        }),
+        Ok((msg, _)) => {
+            if let Some(state) = assembler.push(msg) {
+                SHARED.lock(|s| {
+                    let mut s = s.borrow_mut();
+                    core::mem::swap(&mut s.state, state);
+                    s.version = s.version.wrapping_add(1).max(1);
+                });
+            }
+        }
         Err(_) => log::error!("link: bad line ({} bytes)", line.len()),
     }
 }
@@ -59,13 +74,14 @@ fn handle_line(line: &[u8]) {
 /// Reads lines from the bridge and asks for the state until it arrives.
 pub async fn run(mut rx: UsbSerialJtagRx<'static, Blocking>) -> ! {
     let mut line: Vec<u8, MAX_LINE> = Vec::new();
+    let mut assembler = Assembler::new();
     let mut overflow = false;
     let mut last_hello: Option<Instant> = None;
     loop {
         while let Ok(byte) = rx.read_byte() {
             if byte == b'\n' {
                 if !overflow {
-                    handle_line(&line);
+                    handle_line(&line, &mut assembler);
                 }
                 line.clear();
                 overflow = false;
