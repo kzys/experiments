@@ -1,8 +1,8 @@
 """Draws a mock-up of the panel's screen at 1:1 (320x480): the tower with
 agents in every state, a dark storey, the lobby, roof and street. It is
 where the tower's look is designed; export.py turns its drawings into the
-art in ../assets. Writes demo.png, demo-3x.png and, with the touch areas
-outlined, demo-touch.png and demo-touch-3x.png into OUT_DIR.
+art in ../assets. Writes demo.png, demo-2x.png, demo-3x.png and, with the
+touch areas outlined, demo-touch.png and demo-touch-3x.png into OUT_DIR.
 
 Usage: python demo.py OUT_DIR (needs pypng)
 """
@@ -840,6 +840,7 @@ def main():
     car(img, 1)
     arrow(img, SHAFT_X, 6, True)
     img.save(os.path.join(out, "demo.png"))
+    img.save(os.path.join(out, "demo-2x.png"), 2)
     img.save(os.path.join(out, "demo-3x.png"), 3)
     touch_areas(img, len(storeys), [(SHAFT_X, 6)])
     img.save(os.path.join(out, "demo-touch.png"))

@@ -9,9 +9,9 @@ tall tower.
 Tapping a mascot focuses that agent in herdr. The board talks to a bridge on
 the laptop over USB serial.
 
-<img src="demo.png" width="320" alt="The tower at night: ten storeys of desks with mascots working, dozing, waving and hopping, an elevator on the left, and a lobby and street below">
+<img src="demo.png" width="640" alt="The tower at night: ten storeys of desks with mascots working, dozing, waving and hopping, an elevator on the left, and a lobby and street below">
 
-A mock-up of the screen, drawn by `art-tools/demo.py` (its `demo-3x.png`).
+A mock-up of the screen, drawn by `art-tools/demo.py` (its `demo-2x.png`).
 
 ```
 herdr  <--Unix socket-->  bridge (laptop)  <--USB serial-->  firmware (board)
@@ -59,7 +59,7 @@ Everything is drawn pixel for pixel on the 320x480 screen; each agent has a
 whole screen, to try a look) and written to `assets/` by
 `art-tools/export.py`:
 
-    python art-tools/demo.py /tmp/demo        # demo.png, demo-3x.png, demo-touch*.png
+    python art-tools/demo.py /tmp/demo        # demo.png, demo-2x.png, demo-3x.png, demo-touch*.png
     python art-tools/export.py assets
 
 The PNGs in `assets/` are what the build reads, so they can also be touched
