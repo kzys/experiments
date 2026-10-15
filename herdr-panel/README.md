@@ -42,10 +42,11 @@ All Rust, apart from the Python scripts that draw the art.
   container that the arrow buttons scroll a storey at a time (a jump: redrawing
   the whole screen is too slow to slide). Each workspace (the pane id's part
   before `:`) takes as many storeys as its agents need; each storey gets a
-  piece of decor at its right end. Each agent is a mascot looping its frames;
-  a green plumbob bobs over the focused one, the elevator
-  car slides to its storey, and the view jumps there unless an arrow was
-  pressed in the last 10 s. LVGL gets 512 KB of PSRAM on top of its 48 KB
+  piece of decor at its right end and the workspace's label at its top right,
+  in the 5x8 font, outlined (LVGL fonts that `build.rs` makes from it). Each
+  agent is a mascot looping its frames; a green plumbob bobs over the focused
+  one, the elevator car slides to its storey, and the view jumps there unless
+  an arrow was pressed in the last 10 s. LVGL gets 512 KB of PSRAM on top of its 48 KB
   internal pool, for the widgets of a tall tower.
   `build.rs` renders the images from `scene/` to PNGs at screen size, converts
   them with LVGL's `LVGLImage.py` and compiles them in.
@@ -76,7 +77,7 @@ halo).
 | `storey-0.png` .. `storey-3.png` | a storey's room, one wallpaper per workspace in turn, 320x36, with no desks and the lamps off |
 | `roof-on.png`, `roof-off.png` | the roof, its antenna light on and off, 320x22 |
 | `sprites.png` | the small sprites, decor and mascot, on one sheet; `sprites.yaml` gives each one's `[x, y, width, height]` |
-| `font-5x8.bdf` | the text font: X11's public-domain misc-fixed 5x8, ASCII only; read by the art scripts |
+| `font-5x8.bdf` | the text font: X11's public-domain misc-fixed 5x8, ASCII only; read by the art scripts and `scene` |
 
 The sprites in `sprites.png`:
 
@@ -121,14 +122,15 @@ when working or done, 250 ms when blocked, 500 ms when idle or awake, and 1 s
 ## Messages
 
 Bridge to board, a state as one line each: `{"Begin":{"count":2}}`, then
-`{"Agent":{"id","label","status","focused"}}` per agent, then `"End"`. `id` is
-the herdr pane id. The board decodes one agent at a time and shows the state
+`{"Agent":{"id","label","workspace","status","focused"}}` per agent, then `"End"`. `id` is
+the herdr pane id; `label` is the agent's name, or its workspace's label, and
+`workspace` its workspace's label. The board decodes one agent at a time and shows the state
 only when all announced agents arrived: decoding a whole state at once needs
 several copies of it on the board's stack, which overflowed it. Board to
 bridge: `"Hello"` (sent at start and every 3 s until a state arrives) and
 `{"Focus":{"agent":"w1:p2"}}`. `status` is `idle`, `working`, `blocked`, `done`
-or `unknown`. Limits: 250 agents, labels cut to 24 bytes (the board does not
-show labels at the moment).
+or `unknown`. Limits: 250 agents, labels cut to 24 bytes. The board shows
+only workspace labels, with characters outside ASCII as `?`.
 
 The board's log output shares the port. Lines that do not start with `{` or `"`
 are logs; the bridge prints them as `board: ...`.

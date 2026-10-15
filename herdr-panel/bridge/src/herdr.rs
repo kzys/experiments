@@ -162,6 +162,7 @@ pub fn build_state(agents: &Value, workspaces: &Value) -> State {
         let agent = Agent {
             id: str_of::<ID_LEN>(&a["pane_id"]),
             label: truncated::<LABEL_LEN>(name.or(workspace_label).unwrap_or_default()),
+            workspace: truncated::<LABEL_LEN>(workspace_label.unwrap_or_default()),
             status: status(&a["agent_status"]),
             focused: a["focused"].as_bool().unwrap_or(false),
         };
@@ -204,6 +205,13 @@ mod tests {
         let state = state();
         let labels: Vec<&str> = state.agents.iter().map(|a| a.label.as_str()).collect();
         assert_eq!(labels, ["reviewer", "statusline", "herdr-panel"]);
+    }
+
+    #[test]
+    fn workspace_is_the_workspace_label() {
+        let state = state();
+        let labels: Vec<&str> = state.agents.iter().map(|a| a.workspace.as_str()).collect();
+        assert_eq!(labels, ["statusline", "statusline", "herdr-panel"]);
     }
 
     #[test]
