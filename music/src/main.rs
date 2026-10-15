@@ -45,16 +45,28 @@ fn parse_args() -> Args {
     // Empty means "not set": the UI opens on the server-address screen and
     // asks for one there (see ui.rs) rather than refusing to start.
     let server = server.unwrap_or_default().trim_end_matches('/').to_string();
-    Args { server, username, password }
+    Args {
+        server,
+        username,
+        password,
+    }
 }
 
 fn main() {
     util::init_logging();
     let args = parse_args();
-    let username = args.username.unwrap_or_else(|| util::prompt_line("username: "));
-    let password = args.password.unwrap_or_else(|| util::prompt_password("password: "));
+    let username = args
+        .username
+        .unwrap_or_else(|| util::prompt_line("username: "));
+    let password = args
+        .password
+        .unwrap_or_else(|| util::prompt_password("password: "));
 
-    let shown_server = if args.server.is_empty() { "(unset)" } else { args.server.as_str() };
+    let shown_server = if args.server.is_empty() {
+        "(unset)"
+    } else {
+        args.server.as_str()
+    };
     log::info!("starting: server={shown_server} user={username}");
 
     // The actual connection attempt happens inside ui::run, once a surface

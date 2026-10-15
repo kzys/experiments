@@ -87,9 +87,16 @@ pub fn authenticate(server: &str, username: &str, password: &str) -> Result<Clie
         .set("X-Emby-Authorization", &auth_header)
         .send_json(ureq::json!({ "Username": username, "Pw": password }))
         .map_err(|e| format!("authentication failed: {e}"))?;
-    let auth: AuthResponse = resp.into_json().map_err(|e| format!("bad auth response: {e}"))?;
+    let auth: AuthResponse = resp
+        .into_json()
+        .map_err(|e| format!("bad auth response: {e}"))?;
 
-    Ok(Client { agent, server: server.to_string(), token: auth.access_token, user_id: auth.user.id })
+    Ok(Client {
+        agent,
+        server: server.to_string(),
+        token: auth.access_token,
+        user_id: auth.user.id,
+    })
 }
 
 impl Client {
@@ -99,8 +106,12 @@ impl Client {
         for (k, v) in query {
             req = req.query(k, v);
         }
-        let resp = req.call().map_err(|e| format!("listing items failed: {e}"))?;
-        let items: ItemsResponse = resp.into_json().map_err(|e| format!("bad items response: {e}"))?;
+        let resp = req
+            .call()
+            .map_err(|e| format!("listing items failed: {e}"))?;
+        let items: ItemsResponse = resp
+            .into_json()
+            .map_err(|e| format!("bad items response: {e}"))?;
         Ok(items.items)
     }
 
@@ -127,7 +138,11 @@ impl Client {
     // ParentId (folder-based): an album's tracks really do live in one
     // folder, so the folder hierarchy is the right query here.
     pub fn list_tracks(&self, album_id: &str) -> Result<Vec<Item>, String> {
-        self.get_items(&[("ParentId", album_id), ("IncludeItemTypes", "Audio"), ("SortBy", "IndexNumber")])
+        self.get_items(&[
+            ("ParentId", album_id),
+            ("IncludeItemTypes", "Audio"),
+            ("SortBy", "IndexNumber"),
+        ])
     }
 
     // Stream URL for an item, transcoded on the fly to AAC at a modest

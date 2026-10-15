@@ -35,7 +35,8 @@ Working:
   `$JELLYFIN_SERVER`/`$JELLYFIN_USER`/`$JELLYFIN_PASSWORD`, so the password
   needn't land in shell history. With no server set at all, the UI opens
   on a "Server address" screen and asks for one there (typed via lowkey).
-- Cross-builds for aarch64 the same way as `../lowkey`: rustls instead of
+- Cross-builds for aarch64 the same way as
+  [lowkey](https://github.com/kzys/lowkey): rustls instead of
   OpenSSL, so there's nothing to have on the device's sysroot before linking.
 - `rocknix/Music.sh` is the EmulationStation Ports launcher (shows up as
   "Music"); it sources `/storage/.config/music.env` for credentials rather

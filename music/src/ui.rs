@@ -24,7 +24,6 @@ use crate::mpv::Mpv;
 use crate::pad::{self, NavEvent};
 use crate::util::die;
 
-
 // Same install location music itself ends up at (see Makefile); spawned by
 // absolute path since rocknix/Music.sh execs us with no guarantee that
 // directory is on $PATH.
@@ -76,7 +75,9 @@ impl GlutinWindowContext {
             .with_preference(glutin_winit::ApiPreference::FallbackEgl)
             .with_window_attributes(Some(window_attributes.clone()))
             .build(event_loop, config_template, |mut configs| {
-                configs.next().unwrap_or_else(|| die("no matching GL config"))
+                configs
+                    .next()
+                    .unwrap_or_else(|| die("no matching GL config"))
             })
             .unwrap_or_else(|e| die(&format!("failed to create GL config: {e}")));
         let gl_display = gl_config.display();
@@ -93,11 +94,13 @@ impl GlutinWindowContext {
             .with_context_api(glutin::context::ContextApi::Gles(None))
             .build(raw_window_handle);
         let not_current = unsafe {
-            gl_display.create_context(&gl_config, &context_attributes).unwrap_or_else(|_| {
-                gl_display
-                    .create_context(&gl_config, &gles_attributes)
-                    .unwrap_or_else(|e| die(&format!("failed to create a GL context: {e}")))
-            })
+            gl_display
+                .create_context(&gl_config, &context_attributes)
+                .unwrap_or_else(|_| {
+                    gl_display
+                        .create_context(&gl_config, &gles_attributes)
+                        .unwrap_or_else(|e| die(&format!("failed to create a GL context: {e}")))
+                })
         };
 
         let window = window.take().unwrap_or_else(|| {
@@ -106,11 +109,12 @@ impl GlutinWindowContext {
         });
         let (width, height): (u32, u32) = window.inner_size().into();
         let surface_attributes =
-            glutin::surface::SurfaceAttributesBuilder::<glutin::surface::WindowSurface>::new().build(
-                window.window_handle().expect("window handle").as_raw(),
-                NonZeroU32::new(width).unwrap_or(NonZeroU32::MIN),
-                NonZeroU32::new(height).unwrap_or(NonZeroU32::MIN),
-            );
+            glutin::surface::SurfaceAttributesBuilder::<glutin::surface::WindowSurface>::new()
+                .build(
+                    window.window_handle().expect("window handle").as_raw(),
+                    NonZeroU32::new(width).unwrap_or(NonZeroU32::MIN),
+                    NonZeroU32::new(height).unwrap_or(NonZeroU32::MIN),
+                );
         let gl_surface = unsafe {
             gl_display
                 .create_window_surface(&gl_config, &surface_attributes)
@@ -120,10 +124,18 @@ impl GlutinWindowContext {
             .make_current(&gl_surface)
             .unwrap_or_else(|e| die(&format!("failed to activate GL context: {e}")));
         gl_surface
-            .set_swap_interval(&gl_context, glutin::surface::SwapInterval::Wait(NonZeroU32::MIN))
+            .set_swap_interval(
+                &gl_context,
+                glutin::surface::SwapInterval::Wait(NonZeroU32::MIN),
+            )
             .ok();
 
-        Self { window, gl_context, gl_display, gl_surface }
+        Self {
+            window,
+            gl_context,
+            gl_display,
+            gl_surface,
+        }
     }
 
     fn window(&self) -> &winit::window::Window {
@@ -186,15 +198,27 @@ const LOWKEY_FONT_PATH: &str = "/usr/config/emulationstation/resources/Rubik-Reg
 const CJK_FONT_PATH: &str = "/usr/config/emulationstation/resources/DroidSansFallbackFull.ttf";
 
 fn load_fonts() -> egui::FontDefinitions {
-    let bytes =
-        std::fs::read(FONT_PATH).unwrap_or_else(|e| die(&format!("cannot read font {FONT_PATH}: {e}")));
+    let bytes = std::fs::read(FONT_PATH)
+        .unwrap_or_else(|e| die(&format!("cannot read font {FONT_PATH}: {e}")));
     let cjk_bytes = std::fs::read(CJK_FONT_PATH)
         .unwrap_or_else(|e| die(&format!("cannot read font {CJK_FONT_PATH}: {e}")));
     let mut fonts = egui::FontDefinitions::empty();
-    fonts.font_data.insert("Mono".to_owned(), Arc::new(egui::FontData::from_owned(bytes)));
-    fonts.font_data.insert("CJK".to_owned(), Arc::new(egui::FontData::from_owned(cjk_bytes)));
-    fonts.families.insert(egui::FontFamily::Proportional, vec!["Mono".to_owned(), "CJK".to_owned()]);
-    fonts.families.insert(egui::FontFamily::Monospace, vec!["Mono".to_owned(), "CJK".to_owned()]);
+    fonts.font_data.insert(
+        "Mono".to_owned(),
+        Arc::new(egui::FontData::from_owned(bytes)),
+    );
+    fonts.font_data.insert(
+        "CJK".to_owned(),
+        Arc::new(egui::FontData::from_owned(cjk_bytes)),
+    );
+    fonts.families.insert(
+        egui::FontFamily::Proportional,
+        vec!["Mono".to_owned(), "CJK".to_owned()],
+    );
+    fonts.families.insert(
+        egui::FontFamily::Monospace,
+        vec!["Mono".to_owned(), "CJK".to_owned()],
+    );
     fonts
 }
 // ---- Theme -----------------------------------------------------------------
@@ -271,19 +295,28 @@ fn apply_theme(ctx: &egui::Context) {
 }
 
 fn panel_frame(top: i8, bottom: i8) -> egui::Frame {
-    egui::Frame::new().fill(BG).inner_margin(egui::Margin { left: SIDE, right: SIDE, top, bottom })
+    egui::Frame::new().fill(BG).inner_margin(egui::Margin {
+        left: SIDE,
+        right: SIDE,
+        top,
+        bottom,
+    })
 }
 
 fn draw_title(ui: &mut egui::Ui, title: &str) {
-    egui::Panel::top("title").frame(panel_frame(14, 12)).show(ui, |ui| {
-        ui.heading(title);
-    });
+    egui::Panel::top("title")
+        .frame(panel_frame(14, 12))
+        .show(ui, |ui| {
+            ui.heading(title);
+        });
 }
 
 fn draw_legend(ui: &mut egui::Ui, legend: &str) {
-    egui::Panel::bottom("legend").frame(panel_frame(8, 12)).show(ui, |ui| {
-        ui.weak(legend);
-    });
+    egui::Panel::bottom("legend")
+        .frame(panel_frame(8, 12))
+        .show(ui, |ui| {
+            ui.weak(legend);
+        });
 }
 
 // A handful of the most recent log lines (see util.rs), always visible: the
@@ -293,19 +326,21 @@ fn draw_log_panel(ui: &mut egui::Ui, lines: &[(log::Level, String)]) {
     if lines.is_empty() {
         return;
     }
-    egui::Panel::bottom("log").frame(panel_frame(6, 8)).show(ui, |ui| {
-        ui.spacing_mut().item_spacing.y = 4.0;
-        for (level, line) in lines {
-            let color = match level {
-                log::Level::Error => LOG_ERROR,
-                log::Level::Warn => LOG_WARN,
-                log::Level::Info => LOG_INFO,
-                log::Level::Debug => TEXT,
-                log::Level::Trace => DIM,
-            };
-            ui.add(egui::Label::new(egui::RichText::new(line).small().color(color)).wrap());
-        }
-    });
+    egui::Panel::bottom("log")
+        .frame(panel_frame(6, 8))
+        .show(ui, |ui| {
+            ui.spacing_mut().item_spacing.y = 4.0;
+            for (level, line) in lines {
+                let color = match level {
+                    log::Level::Error => LOG_ERROR,
+                    log::Level::Warn => LOG_WARN,
+                    log::Level::Info => LOG_INFO,
+                    log::Level::Debug => TEXT,
+                    log::Level::Trace => DIM,
+                };
+                ui.add(egui::Label::new(egui::RichText::new(line).small().color(color)).wrap());
+            }
+        });
 }
 
 // The server address field shared by the address and error screens. Only
@@ -357,11 +392,20 @@ fn row_height(ui: &egui::Ui) -> f32 {
 fn draw_row(ui: &mut egui::Ui, selected: bool, marker: &str, left: &str, right: &str) {
     let pad_x = 12.0;
     let font = body_font();
-    let (rect, _) = ui.allocate_exact_size(egui::vec2(ui.available_width(), row_height(ui)), egui::Sense::hover());
+    let (rect, _) = ui.allocate_exact_size(
+        egui::vec2(ui.available_width(), row_height(ui)),
+        egui::Sense::hover(),
+    );
     let painter = ui.painter();
 
     if selected {
-        painter.rect(rect, 3.0, SEL_BG, egui::Stroke::new(1.0, SEL_BORDER), egui::StrokeKind::Inside);
+        painter.rect(
+            rect,
+            3.0,
+            SEL_BG,
+            egui::Stroke::new(1.0, SEL_BORDER),
+            egui::StrokeKind::Inside,
+        );
     }
 
     let right_color = if selected { SEL_WEAK } else { WEAK };
@@ -376,11 +420,19 @@ fn draw_row(ui: &mut egui::Ui, selected: bool, marker: &str, left: &str, right: 
     let left_x = rect.left() + pad_x;
     let mut job = egui::text::LayoutJob::default();
     job.wrap = egui::text::TextWrapping::truncate_at_width(right_x - 16.0 - left_x);
-    let format = |color| egui::text::TextFormat { font_id: font.clone(), color, ..Default::default() };
+    let format = |color| egui::text::TextFormat {
+        font_id: font.clone(),
+        color,
+        ..Default::default()
+    };
     job.append(marker, 0.0, format(SEL_BORDER));
     job.append(left, 0.0, format(TEXT));
     let left_galley = painter.layout_job(job);
-    painter.galley(egui::pos2(left_x, rect.center().y - left_galley.size().y / 2.0), left_galley, TEXT);
+    painter.galley(
+        egui::pos2(left_x, rect.center().y - left_galley.size().y / 2.0),
+        left_galley,
+        TEXT,
+    );
 }
 
 fn fmt_duration(secs: u64) -> String {
@@ -408,7 +460,11 @@ impl Playing {
     }
 
     fn marker(&self) -> Marker {
-        if self.paused { Marker::Paused } else { Marker::Playing }
+        if self.paused {
+            Marker::Paused
+        } else {
+            Marker::Playing
+        }
     }
 }
 
@@ -514,7 +570,10 @@ fn connect(server: &str, username: &str, password: &str) -> State {
 // screen but deaf to button presses. A reaper thread waits for it to exit
 // and wakes the event loop with AppEvent::LowkeyExited, since regrabbing
 // the pad only makes sense once lowkey is actually done with the device.
-fn start_editing(pad: &Arc<EvdevHandle<File>>, proxy: &winit::event_loop::EventLoopProxy<AppEvent>) -> bool {
+fn start_editing(
+    pad: &Arc<EvdevHandle<File>>,
+    proxy: &winit::event_loop::EventLoopProxy<AppEvent>,
+) -> bool {
     if let Err(e) = pad.grab(false) {
         log::warn!("EVIOCGRAB release: {e}");
     }
@@ -523,7 +582,11 @@ fn start_editing(pad: &Arc<EvdevHandle<File>>, proxy: &winit::event_loop::EventL
     // same problem noted in load_fonts() above, same fix: point it at
     // EmulationStation's bundled Rubik, as lowkey's own Terminal.sh already
     // does for its terminal use case.
-    let mut child = match std::process::Command::new(LOWKEY_BIN).arg("-f").arg(LOWKEY_FONT_PATH).spawn() {
+    let mut child = match std::process::Command::new(LOWKEY_BIN)
+        .arg("-f")
+        .arg(LOWKEY_FONT_PATH)
+        .spawn()
+    {
         Ok(c) => c,
         Err(e) => {
             log::warn!("failed to run lowkey: {e}");
@@ -559,11 +622,21 @@ impl App {
 
     // Plays tracks[index] and everything after it, in order.
     fn start_track(&mut self, tracks: Vec<Item>, index: usize) {
-        let Some(State::Browsing(browser)) = self.state.as_ref() else { return };
-        let urls: Vec<String> = tracks[index..].iter().map(|item| browser.stream_url(&item.id)).collect();
+        let Some(State::Browsing(browser)) = self.state.as_ref() else {
+            return;
+        };
+        let urls: Vec<String> = tracks[index..]
+            .iter()
+            .map(|item| browser.stream_url(&item.id))
+            .collect();
         let Some(mpv) = self.mpv() else { return };
         let item = &tracks[index];
-        log::info!("playing {} ({}) at {}kbps", item.name, item.id, api::AUDIO_BITRATE / 1000);
+        log::info!(
+            "playing {} ({}) at {}kbps",
+            item.name,
+            item.id,
+            api::AUDIO_BITRATE / 1000
+        );
         mpv.play(&urls);
         self.playing = Some(Playing {
             tracks,
@@ -575,7 +648,9 @@ impl App {
     }
 
     fn skip(&mut self, delta: i32) {
-        let Some(p) = self.playing.as_ref() else { return };
+        let Some(p) = self.playing.as_ref() else {
+            return;
+        };
         let next = p.index as i32 + delta;
         if next < 0 || next >= p.tracks.len() as i32 {
             return;
@@ -630,7 +705,11 @@ impl App {
                     && p.paused != paused
                 {
                     p.paused = paused;
-                    log::info!("{} {}", if paused { "paused" } else { "resumed" }, p.item().name);
+                    log::info!(
+                        "{} {}",
+                        if paused { "paused" } else { "resumed" },
+                        p.item().name
+                    );
                 }
             }
         }
@@ -645,7 +724,9 @@ impl App {
         match self.state.as_ref().unwrap() {
             State::Error(_) | State::ServerAddress => {
                 let (title, message, legend, color) = match self.state.as_ref().unwrap() {
-                    State::Error(message) => ("Can't reach server", message.clone(), LEGEND_ERROR, DIM),
+                    State::Error(message) => {
+                        ("Can't reach server", message.clone(), LEGEND_ERROR, DIM)
+                    }
                     _ => (
                         "Server address",
                         "Enter your Jellyfin server's address to get started.".to_owned(),
@@ -659,11 +740,18 @@ impl App {
                     draw_title(ui, title);
                     draw_log_panel(ui, &log_lines);
                     draw_legend(ui, legend);
-                    egui::CentralPanel::default().frame(panel_frame(20, 0)).show(ui, |ui| {
-                        ui.label(&message);
-                        ui.add_space(18.0);
-                        draw_server_field(ui, &mut server, editing, if editing { TEXT } else { color });
-                    });
+                    egui::CentralPanel::default()
+                        .frame(panel_frame(20, 0))
+                        .show(ui, |ui| {
+                            ui.label(&message);
+                            ui.add_space(18.0);
+                            draw_server_field(
+                                ui,
+                                &mut server,
+                                editing,
+                                if editing { TEXT } else { color },
+                            );
+                        });
                 });
                 self.server = server;
             }
@@ -694,15 +782,23 @@ impl App {
                         let right = if at_tracks {
                             let dur = item.duration_secs().map(fmt_duration).unwrap_or_default();
                             match playing {
-                                Some(p) => format!("{} / {dur}", fmt_duration(p.position.as_secs())),
+                                Some(p) => {
+                                    format!("{} / {dur}", fmt_duration(p.position.as_secs()))
+                                }
                                 None => dur,
                             }
                         } else {
-                            item.child_count.map(|n| format!("{n} tracks")).unwrap_or_default()
+                            item.child_count
+                                .map(|n| format!("{n} tracks"))
+                                .unwrap_or_default()
                         };
                         // Only tracks can be playing, so only the track
                         // list has the marker column.
-                        let marker = if at_tracks { Marker::text(playing.map(Playing::marker)) } else { "" };
+                        let marker = if at_tracks {
+                            Marker::text(playing.map(Playing::marker))
+                        } else {
+                            ""
+                        };
                         (marker, name, right)
                     })
                     .collect();
@@ -711,43 +807,54 @@ impl App {
                 egui_glow.run(window, |ui| {
                     draw_title(ui, &title);
                     draw_log_panel(ui, &log_lines);
-                    draw_legend(ui, if at_tracks { LEGEND_TRACKS } else { LEGEND_ALBUMS });
+                    draw_legend(
+                        ui,
+                        if at_tracks {
+                            LEGEND_TRACKS
+                        } else {
+                            LEGEND_ALBUMS
+                        },
+                    );
                     let list_frame = egui::Frame::new().fill(BG).inner_margin(egui::Margin {
                         left: SIDE,
                         right: SIDE,
                         top: 10,
                         bottom: 10,
                     });
-                    egui::CentralPanel::default().frame(list_frame).show(ui, |ui| {
-                        ui.spacing_mut().item_spacing.y = 2.0;
-                        // The list isn't scrolled, it's selected: the offset
-                        // is whatever centers the selected row, set up front
-                        // so this pass lays the rows out in their final
-                        // place. (scroll_to_me would only take effect on the
-                        // next pass, showing one frame with the selection
-                        // box moved but the list not yet caught up.) Clamped
-                        // to the list here, since egui only does that after
-                        // laying the content out.
-                        let row_h = row_height(ui);
-                        let spacing = ui.spacing().item_spacing.y;
-                        let pitch = row_h + spacing;
-                        let view_h = ui.available_height();
-                        let content_h = rows.len() as f32 * pitch - spacing;
-                        let offset = (selected as f32 * pitch - (view_h - row_h) / 2.0)
-                            .clamp(0.0, (content_h - view_h).max(0.0));
-                        egui::ScrollArea::vertical()
-                            .vertical_scroll_offset(offset)
-                            .auto_shrink([false, false])
-                            .scroll_bar_visibility(egui::scroll_area::ScrollBarVisibility::AlwaysHidden)
-                            .show(ui, |ui| {
-                                if rows.is_empty() {
-                                    ui.weak("(empty)");
-                                }
-                                for (idx, (marker, name, right)) in rows.iter().enumerate() {
-                                    draw_row(ui, idx == selected, marker, name, right);
-                                }
-                            });
-                    });
+                    egui::CentralPanel::default()
+                        .frame(list_frame)
+                        .show(ui, |ui| {
+                            ui.spacing_mut().item_spacing.y = 2.0;
+                            // The list isn't scrolled, it's selected: the offset
+                            // is whatever centers the selected row, set up front
+                            // so this pass lays the rows out in their final
+                            // place. (scroll_to_me would only take effect on the
+                            // next pass, showing one frame with the selection
+                            // box moved but the list not yet caught up.) Clamped
+                            // to the list here, since egui only does that after
+                            // laying the content out.
+                            let row_h = row_height(ui);
+                            let spacing = ui.spacing().item_spacing.y;
+                            let pitch = row_h + spacing;
+                            let view_h = ui.available_height();
+                            let content_h = rows.len() as f32 * pitch - spacing;
+                            let offset = (selected as f32 * pitch - (view_h - row_h) / 2.0)
+                                .clamp(0.0, (content_h - view_h).max(0.0));
+                            egui::ScrollArea::vertical()
+                                .vertical_scroll_offset(offset)
+                                .auto_shrink([false, false])
+                                .scroll_bar_visibility(
+                                    egui::scroll_area::ScrollBarVisibility::AlwaysHidden,
+                                )
+                                .show(ui, |ui| {
+                                    if rows.is_empty() {
+                                        ui.weak("(empty)");
+                                    }
+                                    for (idx, (marker, name, right)) in rows.iter().enumerate() {
+                                        draw_row(ui, idx == selected, marker, name, right);
+                                    }
+                                });
+                        });
                 });
             }
         }
@@ -801,11 +908,15 @@ impl App {
             _ => {}
         }
         match self.state.as_mut() {
-            Some(State::Error(_) | State::ServerAddress) if ev == NavEvent::Select && !self.editing => {
+            Some(State::Error(_) | State::ServerAddress)
+                if ev == NavEvent::Select && !self.editing =>
+            {
                 if start_editing(&self.pad, &self.proxy) {
                     self.editing = true;
                     if let Some(egui_glow) = &self.egui_glow {
-                        egui_glow.egui_ctx.memory_mut(|m| m.request_focus(server_field_id()));
+                        egui_glow
+                            .egui_ctx
+                            .memory_mut(|m| m.request_focus(server_field_id()));
                     }
                 }
             }
@@ -835,12 +946,18 @@ impl App {
 }
 
 impl winit::application::ApplicationHandler<AppEvent> for App {
-    fn new_events(&mut self, event_loop: &winit::event_loop::ActiveEventLoop, cause: winit::event::StartCause) {
+    fn new_events(
+        &mut self,
+        event_loop: &winit::event_loop::ActiveEventLoop,
+        cause: winit::event::StartCause,
+    ) {
         if let winit::event::StartCause::ResumeTimeReached { .. } = cause {
             // The delayed repaint's timer (see AppEvent::Repaint). Back to
             // plain Wait, or the lapsed deadline would wake us every turn.
             event_loop.set_control_flow(winit::event_loop::ControlFlow::Wait);
-            if !self.held && let Some(gl_window) = &self.gl_window {
+            if !self.held
+                && let Some(gl_window) = &self.gl_window
+            {
                 gl_window.window().request_redraw();
             }
         }
@@ -858,9 +975,11 @@ impl winit::application::ApplicationHandler<AppEvent> for App {
         // request_repaint_after timers would stall until some input event
         // happened to trigger the next redraw.
         let proxy = self.proxy.clone();
-        egui_glow.egui_ctx.set_request_repaint_callback(move |info| {
-            proxy.send_event(AppEvent::Repaint(info.delay)).ok();
-        });
+        egui_glow
+            .egui_ctx
+            .set_request_repaint_callback(move |info| {
+                proxy.send_event(AppEvent::Repaint(info.delay)).ok();
+            });
         egui_glow.egui_ctx.set_fonts(load_fonts());
         apply_theme(&egui_glow.egui_ctx);
         self.egui_glow = Some(egui_glow);
@@ -922,7 +1041,9 @@ impl winit::application::ApplicationHandler<AppEvent> for App {
                     log::warn!("EVIOCGRAB: {e}");
                 }
                 if let Some(egui_glow) = &self.egui_glow {
-                    egui_glow.egui_ctx.memory_mut(|m| m.surrender_focus(server_field_id()));
+                    egui_glow
+                        .egui_ctx
+                        .memory_mut(|m| m.surrender_focus(server_field_id()));
                 }
                 self.server = self.server.trim().trim_end_matches('/').to_string();
                 self.state = Some(connect(&self.server, &self.username, &self.password));
@@ -935,7 +1056,9 @@ impl winit::application::ApplicationHandler<AppEvent> for App {
                 self.on_mpv(ev);
                 // Once a second while playing, for the position counter;
                 // not while held, same as for Nav below.
-                if !self.held && let Some(gl_window) = &self.gl_window {
+                if !self.held
+                    && let Some(gl_window) = &self.gl_window
+                {
                     gl_window.window().request_redraw();
                 }
                 return;
@@ -964,7 +1087,9 @@ impl winit::application::ApplicationHandler<AppEvent> for App {
         self.handle_nav(ev, event_loop);
         // No point painting a dark screen; also keeps the GPU idle while
         // held.
-        if !self.held && let Some(gl_window) = &self.gl_window {
+        if !self.held
+            && let Some(gl_window) = &self.gl_window
+        {
             gl_window.window().request_redraw();
         }
     }
@@ -1008,7 +1133,12 @@ fn watch_signals(proxy: winit::event_loop::EventLoopProxy<AppEvent>) {
     SIGNAL_PIPE.store(fds[1], std::sync::atomic::Ordering::Relaxed);
     let mut read_end = unsafe { File::from_raw_fd(fds[0]) };
     for sig in [libc::SIGTERM, libc::SIGINT] {
-        unsafe { libc::signal(sig, on_signal as extern "C" fn(libc::c_int) as libc::sighandler_t) };
+        unsafe {
+            libc::signal(
+                sig,
+                on_signal as extern "C" fn(libc::c_int) as libc::sighandler_t,
+            )
+        };
     }
     std::thread::spawn(move || {
         let mut byte = [0u8];
@@ -1050,7 +1180,9 @@ pub fn run(server: String, username: String, password: String) {
             if pad::wait_readable(&reader_pad, timeout_ms) {
                 let Some(events) = pad::read_pad(&reader_pad, &mut repeat, &mut chord) else {
                     log::error!("gamepad reader: read error, giving up");
-                    reader_proxy.send_event(AppEvent::Nav(NavEvent::Refresh)).ok();
+                    reader_proxy
+                        .send_event(AppEvent::Nav(NavEvent::Refresh))
+                        .ok();
                     return;
                 };
                 for ev in events {
@@ -1083,5 +1215,7 @@ pub fn run(server: String, username: String, password: String) {
         held: false,
         power_key: None,
     };
-    event_loop.run_app(&mut app).unwrap_or_else(|e| die(&format!("event loop error: {e}")));
+    event_loop
+        .run_app(&mut app)
+        .unwrap_or_else(|e| die(&format!("event loop error: {e}")));
 }
