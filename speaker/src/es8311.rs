@@ -27,7 +27,11 @@ async fn read(i2c: &mut I2c<'static, Async>, reg: u8) -> Result<u8, Error> {
     Ok(v[0])
 }
 
-async fn update(i2c: &mut I2c<'static, Async>, reg: u8, f: impl FnOnce(u8) -> u8) -> Result<(), Error> {
+async fn update(
+    i2c: &mut I2c<'static, Async>,
+    reg: u8,
+    f: impl FnOnce(u8) -> u8,
+) -> Result<(), Error> {
     let v = read(i2c, reg).await?;
     write(i2c, reg, f(v)).await
 }

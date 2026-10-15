@@ -58,7 +58,8 @@ unsafe impl Send for Model {}
 unsafe impl Sync for Model {}
 
 /// The wake word models, set once at start-up.
-pub static MODELS: embassy_sync::once_lock::OnceLock<Vec<Model>> = embassy_sync::once_lock::OnceLock::new();
+pub static MODELS: embassy_sync::once_lock::OnceLock<Vec<Model>> =
+    embassy_sync::once_lock::OnceLock::new();
 
 /// Lists the wake word models in the image.
 pub fn models() -> Vec<Model> {
@@ -68,12 +69,24 @@ pub fn models() -> Vec<Model> {
     for i in 0..list.num as usize {
         // SAFETY: the list has `num` names and infos; infos may be NULL.
         let (name_c, info) = unsafe { (*list.model_name.add(i), *list.model_info.add(i)) };
-        let name = unsafe { CStr::from_ptr(name_c) }.to_string_lossy().into_owned();
+        let name = unsafe { CStr::from_ptr(name_c) }
+            .to_string_lossy()
+            .into_owned();
         if !name.starts_with("wn") {
             continue;
         }
-        let info = if info.is_null() { String::new() } else { unsafe { CStr::from_ptr(info) }.to_string_lossy().into_owned() };
-        out.push(Model { name, word: word_from_info(&info).into(), name_c });
+        let info = if info.is_null() {
+            String::new()
+        } else {
+            unsafe { CStr::from_ptr(info) }
+                .to_string_lossy()
+                .into_owned()
+        };
+        out.push(Model {
+            name,
+            word: word_from_info(&info).into(),
+            name_c,
+        });
     }
     out
 }
@@ -108,7 +121,12 @@ impl Detector {
         }
         // SAFETY: `handle` is a live model of this interface.
         let samples = iface.get_samp_chunksize.map_or(0, |f| unsafe { f(handle) });
-        let mut detector = Self { iface, model: handle, chunk: Vec::new(), filled: 0 };
+        let mut detector = Self {
+            iface,
+            model: handle,
+            chunk: Vec::new(),
+            filled: 0,
+        };
         // Returning early drops `detector`, which destroys the model.
         let samples = usize::try_from(samples).ok().filter(|&n| n > 0)?;
         detector.chunk = vec![0; samples];
@@ -117,7 +135,9 @@ impl Detector {
 
     /// Feeds samples; true if the wake word ended in them.
     pub fn feed(&mut self, mut samples: &[i16]) -> bool {
-        let Some(detect) = self.iface.detect else { return false };
+        let Some(detect) = self.iface.detect else {
+            return false;
+        };
         let mut heard = false;
         while !samples.is_empty() {
             let n = (self.chunk.len() - self.filled).min(samples.len());

@@ -15,7 +15,8 @@ use oxivgl::{
     style::{Selector, color_make},
     view::{NavAction, View, register_event_on},
     widgets::{
-        Align, Bar, Button, Chart, ChartAxis, ChartSeries, ChartType, Label, Obj, Slider, Tabview, WidgetError,
+        Align, Bar, Button, Chart, ChartAxis, ChartSeries, ChartType, Label, Obj, Slider, Tabview,
+        WidgetError,
     },
 };
 
@@ -95,7 +96,11 @@ fn hue_to_rgb(hue: u16) -> u32 {
 
 impl App {
     pub fn new() -> Self {
-        Self { led_level: 128, wake_shown: (NO_MODEL, NO_MODEL, false), ..Default::default() }
+        Self {
+            led_level: 128,
+            wake_shown: (NO_MODEL, NO_MODEL, false),
+            ..Default::default()
+        }
     }
 
     /// Sends the current colour, scaled by brightness, to the LED, unless a
@@ -113,27 +118,46 @@ impl App {
         ));
         if let Some(l) = &self.status_label {
             let mut s = String::<48>::new();
-            let _ = write!(s, "LED #{:06X}  brightness {}%", self.led_rgb, self.led_level as u32 * 100 / 255);
+            let _ = write!(
+                s,
+                "LED #{:06X}  brightness {}%",
+                self.led_rgb,
+                self.led_level as u32 * 100 / 255
+            );
             l.text(&s);
         }
     }
 
     fn rainbow_on(&self) -> bool {
-        self.rainbow_btn.as_ref().is_some_and(|b| b.has_state(ObjState::CHECKED))
+        self.rainbow_btn
+            .as_ref()
+            .is_some_and(|b| b.has_state(ObjState::CHECKED))
     }
 
     /// A transparent wrapping row of buttons inside `tab`.
-    fn button_grid(&mut self, tab: &Obj<'static>, height: i32) -> Result<Obj<'static>, WidgetError> {
+    fn button_grid(
+        &mut self,
+        tab: &Obj<'static>,
+        height: i32,
+    ) -> Result<Obj<'static>, WidgetError> {
         let grid = Obj::new(tab)?;
         grid.size(308, height).pos(0, 0);
-        grid.bg_opa(0).border_width(0).style_pad_all(0, Selector::DEFAULT);
+        grid.bg_opa(0)
+            .border_width(0)
+            .style_pad_all(0, Selector::DEFAULT);
         grid.set_flex_flow(FlexFlow::RowWrap);
         grid.set_flex_align(FlexAlign::SpaceEvenly, FlexAlign::Start, FlexAlign::Start);
         grid.remove_flag(ObjFlag::SCROLLABLE);
         Ok(grid)
     }
 
-    fn button(&mut self, parent: &Obj<'static>, text: &str, bg: u32, fg: u32) -> Result<Button<'static>, WidgetError> {
+    fn button(
+        &mut self,
+        parent: &Obj<'static>,
+        text: &str,
+        bg: u32,
+        fg: u32,
+    ) -> Result<Button<'static>, WidgetError> {
         let btn = Button::new(parent)?;
         btn.size(92, 64).bg_color(bg);
         btn.bubble_events();
@@ -170,7 +194,10 @@ impl App {
 
     fn build_mic_tab(&mut self, tab: &Obj<'static>) -> Result<(), WidgetError> {
         let label = Label::new(tab)?;
-        label.text_font(MONTSERRAT_20).text_color(0xffffff).align(Align::TopMid, 0, 10);
+        label
+            .text_font(MONTSERRAT_20)
+            .text_color(0xffffff)
+            .align(Align::TopMid, 0, 10);
         self.mic_label = Some(label);
 
         let bar = Bar::new(tab)?;
@@ -201,7 +228,10 @@ impl App {
         self.objs.push(grid);
 
         let label = Label::new(tab)?;
-        label.text("Volume").text_color(0xffffff).align(Align::TopMid, 0, 200);
+        label
+            .text("Volume")
+            .text_color(0xffffff)
+            .align(Align::TopMid, 0, 200);
         self.labels.push(label);
 
         let slider = Slider::new(tab)?;
@@ -215,21 +245,36 @@ impl App {
 
     fn build_wake_tab(&mut self, tab: &Obj<'static>) -> Result<(), WidgetError> {
         let status = Label::new(tab)?;
-        status.text_font(MONTSERRAT_20).text_color(0xffffff).align(Align::TopMid, 0, 10);
+        status
+            .text_font(MONTSERRAT_20)
+            .text_color(0xffffff)
+            .align(Align::TopMid, 0, 10);
         self.wake_status = Some(status);
 
         let count = Label::new(tab)?;
-        count.text("Detections: 0").text_color(0xffffff).align(Align::TopMid, 0, 50);
+        count
+            .text("Detections: 0")
+            .text_color(0xffffff)
+            .align(Align::TopMid, 0, 50);
         self.wake_count = Some(count);
 
         let title = Label::new(tab)?;
-        title.text("Wake word").text_color(0xffffff).align(Align::TopMid, 0, 95);
+        title
+            .text("Wake word")
+            .text_color(0xffffff)
+            .align(Align::TopMid, 0, 95);
         self.labels.push(title);
 
         let grid = self.button_grid(tab, 250)?;
         grid.pos(0, 120);
         let wanted = wakeword::WANTED.load(Ordering::Relaxed);
-        for (i, m) in wakeword::MODELS.try_get().map(Vec::as_slice).unwrap_or_default().iter().enumerate() {
+        for (i, m) in wakeword::MODELS
+            .try_get()
+            .map(Vec::as_slice)
+            .unwrap_or_default()
+            .iter()
+            .enumerate()
+        {
             let btn = self.button(&grid, &m.word, 0x455a64, 0xffffff)?;
             btn.add_flag(ObjFlag::CHECKABLE);
             btn.style_bg_color(color_make(0x2e, 0x7d, 0x32), ObjState::CHECKED);
@@ -275,9 +320,14 @@ impl App {
             return;
         }
         self.wake_shown = state;
-        let Some(status) = &self.wake_status else { return };
+        let Some(status) = &self.wake_status else {
+            return;
+        };
         let (wanted, loaded, running) = state;
-        let models = wakeword::MODELS.try_get().map(Vec::as_slice).unwrap_or_default();
+        let models = wakeword::MODELS
+            .try_get()
+            .map(Vec::as_slice)
+            .unwrap_or_default();
         let mut s = String::<48>::new();
         match models.get(usize::from(wanted)) {
             _ if wanted != loaded => s.push_str("Loading...").unwrap(),
@@ -304,7 +354,10 @@ impl App {
                 let mut notes = [Note { hz: 0, ms: 0 }; 24];
                 for (i, n) in notes.iter_mut().enumerate() {
                     let step = if i < 12 { i } else { 24 - i } as u16;
-                    *n = Note { hz: 500 + step * 60, ms: 60 };
+                    *n = Note {
+                        hz: 500 + step * 60,
+                        ms: 60,
+                    };
                 }
                 audio::play(&notes);
             }
@@ -366,7 +419,11 @@ impl View for App {
                 self.play_speaker(i);
             }
         }
-        if let Some(i) = self.wake_btns.iter().position(|b| event.matches(b, EventCode::CLICKED)) {
+        if let Some(i) = self
+            .wake_btns
+            .iter()
+            .position(|b| event.matches(b, EventCode::CLICKED))
+        {
             // One model at a time: the buttons act as radio buttons.
             for (j, b) in self.wake_btns.iter().enumerate() {
                 if j == i {
@@ -401,9 +458,12 @@ impl View for App {
         if mic_due {
             self.last_mic = Some(Instant::now());
             let level = audio::MIC_LEVEL.load(Ordering::Relaxed);
-            if let (Some(bar), Some(label), Some(chart), Some(series)) =
-                (&self.mic_bar, &self.mic_label, &self.mic_chart, &self.mic_series)
-            {
+            if let (Some(bar), Some(label), Some(chart), Some(series)) = (
+                &self.mic_bar,
+                &self.mic_label,
+                &self.mic_chart,
+                &self.mic_series,
+            ) {
                 bar.set_value_raw(i32::from(level), false);
                 let mut s = String::<16>::new();
                 let _ = write!(s, "{} dB", i32::from(level) * 80 / 100 - 80);
@@ -414,7 +474,11 @@ impl View for App {
 
         self.update_wake();
 
-        if self.rainbow_on() && self.last_rainbow.is_none_or(|t| t.elapsed().as_millis() >= 40) {
+        if self.rainbow_on()
+            && self
+                .last_rainbow
+                .is_none_or(|t| t.elapsed().as_millis() >= 40)
+        {
             self.last_rainbow = Some(Instant::now());
             self.hue = (self.hue + 3) % 360;
             self.led_rgb = hue_to_rgb(self.hue);
