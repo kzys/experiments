@@ -16,7 +16,7 @@ use std::fs::{File, OpenOptions};
 use std::os::fd::AsRawFd;
 use std::time::{Duration, Instant};
 
-use input_linux::{sys, EvdevHandle, Key};
+use input_linux::{EvdevHandle, Key, sys};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum NavEvent {
@@ -90,7 +90,10 @@ pub fn open_pad(want: Option<&str>) -> Option<EvdevHandle<File>> {
 
         let found = match want {
             Some(w) => name.contains(w),
-            None => handle.key_bits().map(|b| b.get(Key::ButtonSouth)).unwrap_or(false),
+            None => handle
+                .key_bits()
+                .map(|b| b.get(Key::ButtonSouth))
+                .unwrap_or(false),
         };
         if found {
             log::info!("pad: {name} ({path})");
@@ -115,7 +118,12 @@ pub fn read_pad(
     for ev in &evs[..n] {
         repeat.observe(ev, now);
     }
-    Some(evs[..n].iter().filter_map(|ev| chord.observe(ev).or_else(|| decode(ev))).collect())
+    Some(
+        evs[..n]
+            .iter()
+            .filter_map(|ev| chord.observe(ev).or_else(|| decode(ev)))
+            .collect(),
+    )
 }
 
 // Select alone quits; Select and Start down together toggle hold mode. The
@@ -130,7 +138,11 @@ pub struct Chord {
 
 impl Chord {
     pub fn new() -> Self {
-        Chord { select_down: false, start_down: false, fired: false }
+        Chord {
+            select_down: false,
+            start_down: false,
+            fired: false,
+        }
     }
 
     pub fn observe(&mut self, ev: &sys::input_event) -> Option<NavEvent> {
@@ -168,7 +180,11 @@ impl Chord {
 // become readable, so the reader thread can wake on its own to fire a
 // repeat rather than sitting in read() until the next real event arrives.
 pub fn wait_readable(pad: &EvdevHandle<File>, timeout_ms: i32) -> bool {
-    let mut fds = [libc::pollfd { fd: pad.as_raw_fd(), events: libc::POLLIN, revents: 0 }];
+    let mut fds = [libc::pollfd {
+        fd: pad.as_raw_fd(),
+        events: libc::POLLIN,
+        revents: 0,
+    }];
     let n = unsafe { libc::poll(fds.as_mut_ptr(), 1, timeout_ms) };
     n > 0
 }
@@ -187,7 +203,10 @@ pub struct Repeater {
 
 impl Repeater {
     pub fn new() -> Self {
-        Repeater { held: None, next_at: Instant::now() }
+        Repeater {
+            held: None,
+            next_at: Instant::now(),
+        }
     }
 
     // Same hat-or-buttons detection as decode(), but also needs releases
@@ -203,8 +222,11 @@ impl Repeater {
         } else if ev.type_ as i32 == sys::EV_KEY
             && (ev.code as i32 == sys::BTN_DPAD_UP || ev.code as i32 == sys::BTN_DPAD_DOWN)
         {
-            let dir =
-                if ev.code as i32 == sys::BTN_DPAD_UP { NavEvent::Up } else { NavEvent::Down };
+            let dir = if ev.code as i32 == sys::BTN_DPAD_UP {
+                NavEvent::Up
+            } else {
+                NavEvent::Down
+            };
             match ev.value {
                 1 => Some(Some(dir)),
                 0 => Some(None),

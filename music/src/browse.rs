@@ -43,8 +43,16 @@ impl Browser {
     // and everything built on it free of a lifetime parameter.
     pub fn new(client: Client) -> Result<Self, String> {
         let items = client.list_albums()?;
-        let root = Frame { level: Level::Albums, title: "Albums".to_string(), items, selected: 0 };
-        Ok(Browser { client, stack: vec![root] })
+        let root = Frame {
+            level: Level::Albums,
+            title: "Albums".to_string(),
+            items,
+            selected: 0,
+        };
+        Ok(Browser {
+            client,
+            stack: vec![root],
+        })
     }
 
     pub fn stream_url(&self, item_id: &str) -> String {
@@ -56,7 +64,10 @@ impl Browser {
     }
 
     pub fn move_selection(&mut self, delta: i32) {
-        self.stack.last_mut().expect("browser stack is never empty").move_selection(delta);
+        self.stack
+            .last_mut()
+            .expect("browser stack is never empty")
+            .move_selection(delta);
     }
 
     // Enters the selected item: drills into the next level and returns
@@ -71,7 +82,12 @@ impl Browser {
         match frame.level {
             Level::Albums => {
                 let items = self.client.list_tracks(&item.id)?;
-                self.stack.push(Frame { level: Level::Tracks, title: item.name.clone(), items, selected: 0 });
+                self.stack.push(Frame {
+                    level: Level::Tracks,
+                    title: item.name.clone(),
+                    items,
+                    selected: 0,
+                });
                 Ok(None)
             }
             Level::Tracks => Ok(Some(item.clone())),
@@ -94,9 +110,18 @@ mod tests {
 
     fn frame(len: usize) -> Frame {
         let items = (0..len)
-            .map(|i| Item { id: i.to_string(), name: i.to_string(), ..Default::default() })
+            .map(|i| Item {
+                id: i.to_string(),
+                name: i.to_string(),
+                ..Default::default()
+            })
             .collect();
-        Frame { level: Level::Albums, title: String::new(), items, selected: 0 }
+        Frame {
+            level: Level::Albums,
+            title: String::new(),
+            items,
+            selected: 0,
+        }
     }
 
     #[test]

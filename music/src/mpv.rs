@@ -78,7 +78,9 @@ impl Mpv {
             let mut last_secs = None;
             for line in BufReader::new(reader).lines() {
                 let Ok(line) = line else { break };
-                let Ok(msg) = serde_json::from_str::<serde_json::Value>(&line) else { continue };
+                let Ok(msg) = serde_json::from_str::<serde_json::Value>(&line) else {
+                    continue;
+                };
                 if let Some(ev) = parse(&msg, &mut last_secs) {
                     on_event(ev);
                 }
@@ -86,8 +88,17 @@ impl Mpv {
             on_event(Event::Exited);
         });
 
-        let mut mpv = Mpv { child, socket, path };
-        for (id, name) in [(1, "playlist-pos"), (2, "time-pos"), (3, "pause"), (4, "idle-active")] {
+        let mut mpv = Mpv {
+            child,
+            socket,
+            path,
+        };
+        for (id, name) in [
+            (1, "playlist-pos"),
+            (2, "time-pos"),
+            (3, "pause"),
+            (4, "idle-active"),
+        ] {
             mpv.command(&[json!("observe_property"), json!(id), json!(name)]);
         }
         Ok(mpv)
@@ -132,7 +143,9 @@ impl Drop for Mpv {
 // XDG_RUNTIME_DIR is where the Wayland socket already lives, so it's set
 // wherever the UI can come up at all; /tmp is just a fallback.
 fn socket_path() -> PathBuf {
-    let dir = std::env::var_os("XDG_RUNTIME_DIR").map(PathBuf::from).unwrap_or_else(|| PathBuf::from("/tmp"));
+    let dir = std::env::var_os("XDG_RUNTIME_DIR")
+        .map(PathBuf::from)
+        .unwrap_or_else(|| PathBuf::from("/tmp"));
     dir.join(format!("music-mpv-{}.sock", std::process::id()))
 }
 
@@ -160,7 +173,10 @@ fn parse(msg: &serde_json::Value, last_secs: &mut Option<u64>) -> Option<Event> 
             _ => None,
         },
         Some("end-file") if msg["reason"] == "error" => {
-            log::warn!("mpv: {}", msg["file_error"].as_str().unwrap_or("playback error"));
+            log::warn!(
+                "mpv: {}",
+                msg["file_error"].as_str().unwrap_or("playback error")
+            );
             None
         }
         Some(_) => None,
