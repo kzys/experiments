@@ -3,16 +3,23 @@ HOST   ?= root@192.168.8.154
 TARGET := aarch64-unknown-linux-gnu
 BIN    := target/$(TARGET)/release/music
 
-.PHONY: all install install-config clean
+.PHONY: all fmt-check fmt install install-config clean
 
-# CI has no aarch64 toolchain, so it only checks that a native build works.
+# CI has no aarch64 toolchain, so it only checks the formatting and that a
+# native build works.
 ifdef CI
-all:
+all: fmt-check
 	cargo build --locked
 else
 all:
 	cargo build --release --target $(TARGET)
 endif
+
+fmt-check:
+	cargo fmt --check
+
+fmt:
+	cargo fmt
 
 install: all
 	-ssh $(HOST) 'kill $$(pidof music) 2>/dev/null; sleep 1'
