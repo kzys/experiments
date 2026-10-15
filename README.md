@@ -2,7 +2,7 @@
 
 Small projects that don't need a repository of their own yet. Each directory
 stands alone, with its own README, build and tests. Some of them are vibe
-coded.
+coded. `make` in a directory runs what CI checks for it.
 
 ## herdr-panel
 
@@ -13,3 +13,12 @@ that agent in herdr.
 
 See [herdr-panel/README.md](herdr-panel/README.md) for the design, the
 messages, and how to build and flash the firmware.
+
+## speaker
+
+The same board as a small speaker that listens for a wake word: Rust on
+esp-hal and LVGL, with Espressif's prebuilt ESP-SR libraries linked in for
+WakeNet. Tabs for the LED, the microphone, tones and the wake word.
+
+See [speaker/README.md](speaker/README.md) for how ESP-SR runs without
+ESP-IDF and how to build and flash it.
