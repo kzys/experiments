@@ -56,6 +56,54 @@ pub struct State {
     pub agents: Vec<Agent, MAX_AGENTS>,
 }
 
+/// What the panel's sky shows, by the bridge's local time.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum TimeOfDay {
+    Dawn,
+    Day,
+    Sunset,
+    Night,
+}
+
+impl TimeOfDay {
+    /// Every time of day, from dawn.
+    pub const ALL: [TimeOfDay; 4] = [Self::Dawn, Self::Day, Self::Sunset, Self::Night];
+
+    /// The time of day `minute` minutes after local midnight: dawn from
+    /// 5:00, day from 7:00, sunset from 17:00 and night from 19:00.
+    pub fn at(minute: u16) -> Self {
+        match minute / 60 {
+            5..=6 => Self::Dawn,
+            7..=16 => Self::Day,
+            17..=18 => Self::Sunset,
+            _ => Self::Night,
+        }
+    }
+
+    /// Its name, as in the art's file names.
+    pub fn name(self) -> &'static str {
+        match self {
+            Self::Dawn => "dawn",
+            Self::Day => "day",
+            Self::Sunset => "sunset",
+            Self::Night => "night",
+        }
+    }
+}
+
+/// How far clouds drift, in pixels per hour: so slowly that one takes about
+/// two weeks to cross the screen.
+pub const CLOUD_PX_PER_HOUR: u32 = 1;
+
+/// The left edge of a cloud `w` wide that starts at `x` on a screen `screen_w`
+/// wide, after `hours` hours of drifting right: past the right edge, it comes
+/// back in at the left.
+pub fn cloud_x(x: i32, w: i32, screen_w: i32, hours: u32) -> i32 {
+    let span = (screen_w + w) as u32;
+    let drift = (hours % span * CLOUD_PX_PER_HOUR % span) as i32;
+    (x + drift + w) % (screen_w + w) - w
+}
+
 /// Bridge to board.
 ///
 /// A [`State`] goes as `Begin`, then one `Agent` per agent, then `End`, each on
@@ -64,9 +112,17 @@ pub struct State {
 /// its stack.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub enum ToBoard {
-    Begin { count: u16 },
+    Begin {
+        count: u16,
+    },
     Agent(Agent),
     End,
+    /// The bridge's clock: minutes since local midnight, and hours since the
+    /// Unix epoch. Sent on its own, whenever the minute changes.
+    Clock {
+        minute: u16,
+        hour: u32,
+    },
 }
 
 /// The messages that send `state`, in order.
@@ -111,6 +167,7 @@ impl Assembler {
                     self.expected = None;
                 }
             }
+            ToBoard::Clock { .. } => {}
             ToBoard::End => {
                 let complete = self
                     .expected
@@ -259,6 +316,46 @@ mod tests {
             panic!("{msg:?}");
         };
         assert_eq!(agent.workspace, "");
+    }
+
+    #[test]
+    fn the_clock_is_one_short_line() {
+        let clock = ToBoard::Clock {
+            minute: 1439,
+            hour: 500_000,
+        };
+        let json = serde_json::to_string(&clock).unwrap();
+        assert_eq!(json, r#"{"Clock":{"minute":1439,"hour":500000}}"#);
+        assert_eq!(
+            serde_json_core::from_str::<ToBoard>(&json).unwrap().0,
+            clock
+        );
+    }
+
+    #[test]
+    fn the_day_turns_at_5_7_17_and_19() {
+        let at = |h: u16, m: u16| TimeOfDay::at(h * 60 + m);
+        assert_eq!(at(4, 59), TimeOfDay::Night);
+        assert_eq!(at(5, 0), TimeOfDay::Dawn);
+        assert_eq!(at(7, 0), TimeOfDay::Day);
+        assert_eq!(at(16, 59), TimeOfDay::Day);
+        assert_eq!(at(17, 0), TimeOfDay::Sunset);
+        assert_eq!(at(19, 0), TimeOfDay::Night);
+        assert_eq!(at(0, 0), TimeOfDay::Night);
+    }
+
+    #[test]
+    fn clouds_drift_right_and_wrap_around() {
+        let x = |hours| cloud_x(14, 46, 320, hours);
+        assert_eq!(x(0), 14);
+        assert_eq!(x(3), 17);
+        // The last pixel column on screen, then just off the left edge.
+        assert_eq!(x(305), 319);
+        assert_eq!(x(306), -46);
+        assert_eq!(x(307), -45);
+        // Back where it started after crossing the screen and itself.
+        assert_eq!(x(366), 14);
+        assert_eq!(x(u32::MAX), x(u32::MAX % 366));
     }
 
     #[test]

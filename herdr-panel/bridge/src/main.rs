@@ -7,8 +7,9 @@ mod panel;
 
 use std::{path::PathBuf, sync::mpsc, thread, time::Duration};
 
+use chrono::{DateTime, TimeZone, Timelike};
 use herdr::Herdr;
-use herdr_panel_protocol::{State, ToHost};
+use herdr_panel_protocol::{State, ToBoard, ToHost};
 use panel::Writer;
 
 /// How often herdr is polled even without events, in case one is missed.
@@ -39,6 +40,15 @@ fn args() -> (String, Option<PathBuf>) {
 fn usage() -> ! {
     eprintln!("usage: herdr-panel-bridge [--port /dev/ttyACM0] [--socket PATH]");
     std::process::exit(2)
+}
+
+/// The clock message for `now`: minutes since its local midnight, and hours
+/// since the Unix epoch.
+fn clock<Tz: TimeZone>(now: &DateTime<Tz>) -> ToBoard {
+    ToBoard::Clock {
+        minute: (now.hour() * 60 + now.minute()) as u16,
+        hour: (now.timestamp().max(0) / 3600) as u32,
+    }
 }
 
 fn main() {
@@ -96,14 +106,22 @@ fn main() {
     });
 
     let mut last: Option<State> = None;
+    let mut last_clock: Option<ToBoard> = None;
     for wake in rx {
         match wake {
-            Wake::BoardConnected | Wake::Board(ToHost::Hello) => last = None,
+            Wake::BoardConnected | Wake::Board(ToHost::Hello) => {
+                last = None;
+                last_clock = None;
+            }
             Wake::Board(ToHost::Focus { agent }) => match herdr.focus_agent(&agent) {
                 Ok(()) => eprintln!("focused {agent}"),
                 Err(e) => eprintln!("{e}"),
             },
             Wake::Refresh => {}
+        }
+        let now = clock(&chrono::Local::now());
+        if last_clock.as_ref() != Some(&now) && writer.send(&now).is_ok() {
+            last_clock = Some(now);
         }
         match herdr.state() {
             Ok(state) if last.as_ref() != Some(&state) => {
@@ -119,5 +137,25 @@ fn main() {
             Ok(_) => {}
             Err(e) => eprintln!("{e}"),
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use chrono::FixedOffset;
+
+    use super::*;
+
+    #[test]
+    fn the_clock_is_local_minutes_and_epoch_hours() {
+        // 07:30 at UTC-7 is 14:30 UTC.
+        let pdt = FixedOffset::west_opt(7 * 3600).unwrap();
+        let now = pdt.with_ymd_and_hms(2026, 10, 15, 7, 30, 59).unwrap();
+        let ToBoard::Clock { minute, hour } = clock(&now) else {
+            panic!("not a clock");
+        };
+        assert_eq!(minute, 7 * 60 + 30);
+        assert_eq!(hour % 24, 14);
+        assert_eq!(hour as i64, now.timestamp() / 3600);
     }
 }

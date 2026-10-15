@@ -1,16 +1,18 @@
 //! Writes a PNG of the tower as the board would show it: `cargo run -p
-//! herdr-panel-scene --example preview -- out.png 2,1,8 [scroll]` shows
-//! three workspaces with two, one and eight agents, in varying states, scrolled
-//! up by `scroll` art pixels (default 0, the bottom). The first agent is
-//! focused. Workspaces take their labels from a made-up list in turn.
+//! herdr-panel-scene --example preview -- out.png 2,1,8 [scroll] [time]
+//! [hours]` shows three workspaces with two, one and eight agents, in varying
+//! states, scrolled up by `scroll` art pixels (default 0, the bottom), at
+//! `time` of day (dawn, day, sunset or night, the default) with the clouds
+//! drifted for `hours` hours (default 0). The first agent is focused.
+//! Workspaces take their labels from a made-up list in turn.
 
 use std::{env, fs::File, io::BufWriter};
 
-use herdr_panel_protocol::Status;
+use herdr_panel_protocol::{Status, TimeOfDay};
 use herdr_panel_scene::{
     CAR_AT, DECOR_AT, DECORS, DESKS_PER_STOREY, DIGIT_W, GROUND_Y, PLUMBOB_ABOVE, SCALE, animation,
-    backdrop, behind_desk, car, decor, digits, label, label_at, lobby, number_at, plumbob, roof,
-    roof_top, slot, storey, storey_top, street,
+    backdrop, behind_desk, car, cloud_at, clouds, decor, digits, label, label_at, lobby, number_at,
+    plumbob, roof, roof_top, slot, storey, storey_top, street,
 };
 
 /// Workspace labels.
@@ -32,6 +34,13 @@ fn main() {
         .map(|s| s.parse().unwrap())
         .collect();
     let scroll: i32 = args.get(3).map_or(0, |s| s.parse().unwrap());
+    let time = args.get(4).map_or(TimeOfDay::Night, |s| {
+        *TimeOfDay::ALL
+            .iter()
+            .find(|t| t.name() == s)
+            .unwrap_or_else(|| panic!("no time of day {s}"))
+    });
+    let hours: u32 = args.get(5).map_or(0, |s| s.parse().unwrap());
     let statuses = [
         Status::Working,
         Status::Idle,
@@ -54,7 +63,11 @@ fn main() {
         }
     }
 
-    let mut img = backdrop();
+    let mut img = backdrop(time);
+    for (k, cloud) in clouds(time).iter().enumerate() {
+        let (cx, cy) = cloud_at(k, hours);
+        img.draw(cloud, cx, cy);
+    }
     let at = |y: i32| y + scroll;
     img.draw(&street(), 0, at(GROUND_Y));
     img.draw(&lobby(), 0, at(storey_top(0)));
@@ -63,8 +76,13 @@ fn main() {
         let level = k + 1;
         let top = at(storey_top(level));
         let lit = agents.iter().any(|s| *s != Status::Idle);
-        img.draw(&storey(*ws, lit), 0, top);
-        img.draw(&decor(level % DECORS, lit), DECOR_AT.0, top + DECOR_AT.1);
+        img.draw(&storey(*ws, lit, time), 0, top);
+        let decor_lit = lit || time != TimeOfDay::Night;
+        img.draw(
+            &decor(level % DECORS, decor_lit),
+            DECOR_AT.0,
+            top + DECOR_AT.1,
+        );
         let name = NAMES[*ws % NAMES.len()];
         let (lx, ly) = label_at(name.len());
         img.draw(&label(name), lx - 1, top + ly - 1);

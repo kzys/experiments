@@ -16,12 +16,22 @@ struct Shared {
     /// Bumped on every state received; 0 until the first one.
     version: u32,
     state: State,
+    /// The bridge's last clock: minutes since local midnight, and hours
+    /// since the Unix epoch.
+    clock: Option<(u16, u32)>,
 }
 
 static SHARED: Mutex<CriticalSectionRawMutex, RefCell<Shared>> = Mutex::new(RefCell::new(Shared {
     version: 0,
     state: State { agents: Vec::new() },
+    clock: None,
 }));
+
+/// The bridge's last clock, if it has sent one: minutes since local
+/// midnight, and hours since the Unix epoch.
+pub fn clock() -> Option<(u16, u32)> {
+    SHARED.lock(|s| s.borrow().clock)
+}
 
 /// Copies the latest state into `out` if it is newer than `seen`, and returns
 /// its version. Copies agent by agent: a whole state is too big for the stack.
@@ -60,6 +70,9 @@ fn handle_line(line: &[u8], assembler: &mut Assembler) {
         return;
     }
     match serde_json_core::from_slice::<ToBoard>(line) {
+        Ok((ToBoard::Clock { minute, hour }, _)) => {
+            SHARED.lock(|s| s.borrow_mut().clock = Some((minute, hour)));
+        }
         Ok((msg, _)) => {
             if let Some(state) = assembler.push(msg) {
                 SHARED.lock(|s| {

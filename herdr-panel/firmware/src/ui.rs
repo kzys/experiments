@@ -7,7 +7,9 @@
 //! storey and a plumbob floats over that agent. Tapping an agent asks the
 //! bridge to focus it.
 //!
-//! The sky stays still; when the tower is taller than the screen, arrow
+//! The sky shows the time of day by the bridge's clock, night until it
+//! sends one, with clouds by day that drift a pixel an hour. It stays still;
+//! when the tower is taller than the screen, arrow
 //! buttons over the elevator shaft scroll it a storey at a time (a jump, not a
 //! slide: the panel is too slow to redraw a whole screen smoothly). The view
 //! follows the focused agent, unless an arrow was pressed in the last
@@ -15,7 +17,7 @@
 
 use alloc::{string::String, vec::Vec};
 use embassy_time::Instant;
-use herdr_panel_protocol::{Id, State, Status, ToHost, storeys};
+use herdr_panel_protocol::{Id, State, Status, TimeOfDay, ToHost, cloud_x, storeys};
 use oxivgl::{
     anim::{ANIM_REPEAT_INFINITE, Anim, anim_path_ease_in_out, anim_set_y},
     enums::{EventCode, ObjFlag, ScrollbarMode},
@@ -28,16 +30,18 @@ use oxivgl::{
 
 use crate::{
     frames::{
-        ARROW_SIZE, ARROW_X, CAR_AT, DECOR_AT, DECORS, DESK_SPACING, DESKS_PER_STOREY, DESKS_X,
-        DIGIT_W, FONT_H, FONT_W, GROUND_Y, LABEL_COLOUR, LABEL_END, LABEL_FONT, LABEL_OUTLINE,
-        LABEL_OUTLINE_FONT, Loop, NUMBER_AT, PLUMBOB_ABOVE, PLUMBOB_W, ROOF_H, SLOTS, STOREY_H,
-        arrow_down_image, arrow_up_image, awake, backdrop_image, car_image, decor_image,
-        digit_image, lobby_image, loops, plumbob, roof, storey_image, street_image,
+        ARROW_SIZE, ARROW_X, CAR_AT, CLOUDS, DECOR_AT, DECORS, DESK_SPACING, DESKS_PER_STOREY,
+        DESKS_X, DIGIT_W, FONT_H, FONT_W, GROUND_Y, LABEL_COLOUR, LABEL_END, LABEL_FONT,
+        LABEL_OUTLINE, LABEL_OUTLINE_FONT, Loop, NUMBER_AT, PLUMBOB_ABOVE, PLUMBOB_W, ROOF_H,
+        SLOTS, STOREY_H, arrow_down_image, arrow_up_image, awake, backdrop_image, car_image,
+        cloud_image, decor_image, digit_image, lobby_image, loops, plumbob, roof, storey_image,
+        street_image,
     },
     link,
     touch::POINTER,
 };
 
+const SCREEN_W: i32 = 320;
 const SCREEN_H: i32 = 480;
 /// Sky kept above the roof when scrolled to the top, in screen pixels.
 const TOP_MARGIN: i32 = 48;
@@ -80,6 +84,11 @@ struct Rendered {
 pub struct Panel {
     indev: Option<PointerIndev>,
     backdrop: Option<Image<'static>>,
+    clouds: Vec<Image<'static>>,
+    /// What the sky shows, and the hours since the Unix epoch that the
+    /// clouds have drifted for.
+    time: TimeOfDay,
+    hour: u32,
     scroller: Option<Obj<'static>>,
     up: Option<Image<'static>>,
     down: Option<Image<'static>>,
@@ -110,6 +119,9 @@ impl Panel {
         Self {
             indev: None,
             backdrop: None,
+            clouds: Vec::new(),
+            time: TimeOfDay::Night,
+            hour: 0,
             scroller: None,
             up: None,
             down: None,
@@ -193,11 +205,16 @@ impl Panel {
             let level = k + 1;
             let top = at(storey_top(level));
             let lit = storey.lit();
-            r.images
-                .push(self.image(scroller, storey_image(storey.workspace, lit), 0, top)?);
             r.images.push(self.image(
                 scroller,
-                decor_image(level % DECORS, lit),
+                storey_image(storey.workspace, lit, self.time),
+                0,
+                top,
+            )?);
+            // By day, decor in a storey with its lights off is not moonlit.
+            r.images.push(self.image(
+                scroller,
+                decor_image(level % DECORS, lit || self.time != TimeOfDay::Night),
                 DECOR_AT.0,
                 top + DECOR_AT.1,
             )?);
@@ -264,6 +281,27 @@ impl Panel {
         self.follow = Some(focused);
         self.show_arrows();
         Ok(())
+    }
+
+    /// Shows the sky for `self.time` and its clouds where `self.hour` puts
+    /// them.
+    fn show_sky(&self) {
+        if let Some(b) = &self.backdrop {
+            b.set_src(backdrop_image(self.time));
+        }
+        for (k, cloud) in self.clouds.iter().enumerate() {
+            match cloud_image(self.time, k) {
+                Some(src) => {
+                    let (x, y, w) = CLOUDS[k];
+                    cloud.set_src(src);
+                    cloud.pos(cloud_x(x, w, SCREEN_W, self.hour), y);
+                    cloud.remove_flag(ObjFlag::HIDDEN);
+                }
+                None => {
+                    cloud.add_flag(ObjFlag::HIDDEN);
+                }
+            }
+        }
     }
 
     /// Jumps the view to `scroll`, kept within the tower, and shows only the
@@ -425,7 +463,12 @@ impl View for Panel {
         self.awake = Some(awake());
         self.roof = Some(roof());
         container.bg_color(0x000000).bg_opa(255);
-        self.backdrop = Some(self.image(container, backdrop_image(), 0, 0)?);
+        self.backdrop = Some(self.image(container, backdrop_image(self.time), 0, 0)?);
+        for _ in CLOUDS {
+            let cloud = Image::new(container)?;
+            cloud.add_flag(ObjFlag::HIDDEN);
+            self.clouds.push(cloud);
+        }
 
         let scroller = Obj::new(container)?;
         scroller.remove_style_all();
@@ -466,8 +509,21 @@ impl View for Panel {
     }
 
     fn update(&mut self) -> Result<NavAction, WidgetError> {
+        let mut redraw = false;
+        if let Some((minute, hour)) = link::clock() {
+            let time = TimeOfDay::at(minute);
+            if time != self.time || hour != self.hour {
+                redraw = time != self.time;
+                self.time = time;
+                self.hour = hour;
+                self.show_sky();
+            }
+        }
         if let Some(version) = link::newer_into(self.shown, &mut self.state) {
             self.shown = version;
+            redraw = true;
+        }
+        if redraw {
             self.render()?;
         }
         self.follow();

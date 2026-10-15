@@ -2,9 +2,10 @@
 agents in every state, a dark storey, the lobby, roof and street. It is
 where the tower's look is designed; export.py turns its drawings into the
 art in ../assets. Writes demo.png, demo-2x.png, demo-3x.png and, with the
-touch areas outlined, demo-touch.png and demo-touch-3x.png into OUT_DIR.
+touch areas outlined, demo-touch.png and demo-touch-3x.png into OUT_DIR,
+at TIME of day: dawn, day, sunset or night (the default).
 
-Usage: python demo.py OUT_DIR (needs pypng)
+Usage: python demo.py OUT_DIR [TIME] (needs pypng)
 """
 
 import math
@@ -61,6 +62,14 @@ class Img:
                 if d <= 1:
                     self.blend(x, y, c, a * (3 - math.floor(d * 3)) / 3)
 
+    def paste(self, other, x, y):
+        """Draws `other` with its top left at (`x`, `y`), skipping its
+        transparent pixels."""
+        for yy in range(other.h):
+            for xx in range(other.w):
+                if other.px[yy][xx][3]:
+                    self.set(x + xx, y + yy, other.px[yy][xx])
+
     def grid(self, x, y, rows, palette):
         """Draws a text grid: each character is a pixel, looked up in
         `palette`; '.' and ' ' are transparent."""
@@ -112,7 +121,43 @@ LAMP = h(0xFFF0A0)
 WARM = h(0xFFD890)
 MOON = h(0xF8F0D0)
 MOONLIGHT = h(0x5868B0)
-SKY = [h(0x100828), h(0x201848), h(0x382868), h(0x583880), h(0x904878), h(0xD07058)]
+# The sky at each time of day, from the top of the screen down to the
+# ground: its colours, how many stars show (0 to 1), and what hangs in it.
+TIMES = {
+    "dawn": {
+        "sky": [0x283870, 0x485898, 0x8070B0, 0xC888B0, 0xF0A8A0, 0xF8D0A0],
+        "stars": 0.3,
+        "body": "sun",
+        "clouds": ramp(0xF8D8D0, 0xE0A8B8, 0xA07898),
+    },
+    "day": {
+        "sky": [0x3070D0, 0x4088E0, 0x58A0E8, 0x78B8F0, 0x98D0F8, 0xC0E0F8],
+        "stars": 0,
+        "body": "sun",
+        "clouds": ramp(0xFFFFFF, 0xE8F0F8, 0xA8C0D8),
+    },
+    "sunset": {
+        "sky": [0x282058, 0x503878, 0x904888, 0xD86070, 0xF08850, 0xF8B858],
+        "stars": 0.1,
+        "body": "sun",
+        "clouds": ramp(0xF8B890, 0xD87878, 0x804868),
+    },
+    "night": {
+        "sky": [0x100828, 0x201848, 0x382868, 0x583880, 0x904878, 0xD07058],
+        "stars": 1,
+        "body": "moon",
+        "clouds": None,
+    },
+}
+TIME = "night"
+SKY = [h(c) for c in TIMES[TIME]["sky"]]
+
+
+def set_time(name):
+    """Makes everything drawn from now on show time of day `name`."""
+    global TIME, SKY
+    TIME = name
+    SKY = [h(c) for c in TIMES[name]["sky"]]
 WALLPAPER = [
     ramp(0xF8E8C8, 0xF0D0A8, 0xC8A880),
     ramp(0xD0F0E0, 0xB0D8C8, 0x88B0A0),
@@ -187,21 +232,25 @@ def sky(y):
     return mix(SKY[i], SKY[i + 1], t - i)
 
 
-def backdrop(img):
-    for y in range(H):
-        img.fill(0, y, W, 1, sky(y))
+def stars(img, amount):
+    """Stars in the upper sky; `amount` (0 to 1) of them show, the faint
+    ones first to go."""
     for y in range(0, 200):
         for x in range(W):
             r = hsh(x, y) % 300
-            if r == 0:
-                img.set(x, y, h(0xF8F8F8))
-            elif r < 3:
-                img.blend(x, y, h(0xC0C8F8), 0.6)
+            if r == 0 and amount >= 0.1:
+                img.blend(x, y, h(0xF8F8F8), min(1, amount * 1.5))
+            elif r < 3 and hsh(y, x) % 10 < amount * 10:
+                img.blend(x, y, h(0xC0C8F8), 0.6 * amount)
+    if amount < 0.5:
+        return
     for sx, sy in [(30, 40), (150, 22), (110, 120), (230, 150)]:
         img.set(sx, sy, h(0xFFFFFF))
         for dx, dy in [(1, 0), (-1, 0), (0, 1), (0, -1)]:
             img.blend(sx + dx, sy + dy, h(0xC0C8F8), 0.7)
-    cx, cy = 268, 62
+
+
+def moon(img, cx, cy):
     img.glow(cx, cy, 22, MOON, 0.16)
     for y in range(-9, 10):
         for x in range(-9, 10):
@@ -212,6 +261,108 @@ def backdrop(img):
                     img.set(cx + x, cy + y, MOON)
     for x, y in [(cx + 3, cy - 4), (cx + 6, cy + 1), (cx + 2, cy + 5)]:
         img.set(x, y, h(0xD8D0B0))
+
+
+def sun(img, cx, cy, r, core, rim, halo):
+    """A sun of radius `r`: `core` in the middle, `rim` at the edge, and a
+    halo of `halo` around it."""
+    img.glow(cx, cy, r * 3, halo, 0.22)
+    for y in range(-r, r + 1):
+        for x in range(-r, r + 1):
+            d = x * x + y * y
+            if d <= r * r:
+                img.set(cx + x, cy + y, rim if d > (r - 2) ** 2 else core)
+
+
+CLOUD_H = 13
+# Each cloud's place with no drift: its left edge and base, and its width.
+CLOUDS = [(14, 92, 46), (176, 70, 38), (110, 186, 54), (228, 214, 40)]
+
+
+def cloud(w, seed, c):
+    """A flat-bottomed pixel cloud `w` wide and CLOUD_H tall, shaped by
+    `seed`: puffs of `c["light"]` on a `c["base"]` body, shaded with
+    `c["dark"]` below."""
+    img = Img(w, CLOUD_H)
+    y = CLOUD_H - 1
+    puffs = [(w * k // 4, y - 3 - (hsh(seed, k) % 4), 4 + hsh(k, seed) % 4) for k in range(1, 4)]
+    for yy in range(CLOUD_H):
+        for xx in range(w):
+            inside = yy >= y - 3 or any((xx - px) ** 2 + (yy - py) ** 2 <= r * r for px, py, r in puffs)
+            if not inside:
+                continue
+            top = not any((xx - px) ** 2 + (yy - 1 - py) ** 2 <= r * r for px, py, r in puffs) and yy < y - 3
+            img.set(xx, yy, c["dark"] if yy >= y - 1 else c["light"] if top else c["base"])
+    return img
+
+
+# How far clouds drift, in pixels per hour: so slowly that one takes about
+# two weeks to cross the screen. The drift at a moment is the hours since
+# the Unix epoch, so it needs no state of its own.
+CLOUD_PX_PER_HOUR = 1
+
+
+def cloud_drift(unix_seconds):
+    """The clouds' drift, in pixels, at `unix_seconds`."""
+    return unix_seconds * CLOUD_PX_PER_HOUR // 3600
+
+
+def cloud_at(k, drift):
+    """Where cloud `k`'s top left goes after drifting `drift` pixels to the
+    right: off the right edge, it comes back in at the left."""
+    x, base, w = CLOUDS[k]
+    return (x + drift + w) % (W + w) - w, base - CLOUD_H + 1
+
+
+def clouds(img, drift=0):
+    """The time of day's clouds, if it has any, drifted `drift` pixels."""
+    c = TIMES[TIME]["clouds"]
+    if not c:
+        return
+    for k, (x, _, w) in enumerate(CLOUDS):
+        img.paste(cloud(w, x, c), *cloud_at(k, drift))
+
+
+# A 4x4 ordered-dither threshold map.
+BAYER = [[0, 8, 2, 10], [12, 4, 14, 6], [3, 11, 1, 9], [15, 7, 13, 5]]
+
+
+def sky_dithered(x, y):
+    """The sky's colour at (`x`, `y`), a smooth gradient that each channel
+    rounds up or down to one of its 15-bit levels by a 4x4 ordered dither,
+    so the levels blend instead of banding."""
+    t = min(max(y / GROUND, 0), 1) ** 1.3 * (len(SKY) - 1)
+    i = min(int(t), len(SKY) - 2)
+    a, b, f = SKY[i], SKY[i + 1], t - i
+    threshold = (BAYER[y % 4][x % 4] + 0.5) / 16
+    out = []
+    for k in range(3):
+        v = (a[k] + (b[k] - a[k]) * f) / 8
+        lo = int(v)
+        out.append(min(248, 8 * (lo + (1 if v - lo > threshold else 0))))
+    return tuple(out) + (255,)
+
+
+def backdrop(img, dither=True):
+    """The sky, its stars and its sun or moon; the sky's gradient dithered
+    if `dither`, else in flat bands."""
+    t = TIMES[TIME]
+    for y in range(H):
+        if dither:
+            for x in range(W):
+                img.set(x, y, sky_dithered(x, y))
+        else:
+            img.fill(0, y, W, 1, sky(y))
+    if t["stars"]:
+        stars(img, t["stars"])
+    if TIME == "dawn":
+        sun(img, 64, 150, 9, h(0xFFF8E0), h(0xF8D898), h(0xF8C8A0))
+    elif TIME == "day":
+        sun(img, 250, 52, 8, h(0xFFFFF0), h(0xF8F0B0), h(0xFFF8D0))
+    elif TIME == "sunset":
+        sun(img, 250, 140, 12, h(0xF8D070), h(0xF89848), h(0xF89060))
+    else:
+        moon(img, 268, 62)
 
 
 def bricks(img, x, y, w, hh):
@@ -565,6 +716,7 @@ def oblique(img, x, y, w, hh, depth, r):
     img.fill(x - depth, y - depth, 1, bottom - y, INK)
     img.box(x, y, w, hh, r["base"], INK)
 
+
 def desk(img, cx, top, lit, i, occupied):
     """A workstation in front of the agent's right half: a solid desk in
     oblique projection, receding to the upper left, so its top shows as a
@@ -644,6 +796,9 @@ def storey(img, level, paper, agents, focus=None):
         desk(img, desk_centre(i), top, lit, i + level, i < len(agents))
     if lit:
         lamps(img, top, True)
+    elif TIME != "night":
+        # By day a room with the lights off is just that.
+        lamps(img, top, False)
     else:
         for y in range(top, top + INNER + 1):
             for x in range(ROOMS_X, ROOMS_END):
@@ -832,8 +987,10 @@ def touch_areas(img, storeys, arrows):
 
 def main():
     out = sys.argv[1] if len(sys.argv) > 1 else "."
+    set_time(sys.argv[2] if len(sys.argv) > 2 else "night")
     img = Img(W, H)
     backdrop(img)
+    clouds(img)
     street(img)
     lobby(img)
     storeys = [
