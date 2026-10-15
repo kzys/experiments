@@ -60,7 +60,12 @@ struct Tone {
 
 impl Tone {
     const fn new() -> Self {
-        Self { note: None, done: 0, total: 0, phase: 0.0 }
+        Self {
+            note: None,
+            done: 0,
+            total: 0,
+            phase: 0.0,
+        }
     }
 
     /// Next sample, or `None` when nothing is queued.
@@ -82,7 +87,11 @@ impl Tone {
         } else {
             1.0
         };
-        let s = if n.hz == 0 { 0.0 } else { amp * env * libm::sinf(self.phase) };
+        let s = if n.hz == 0 {
+            0.0
+        } else {
+            amp * env * libm::sinf(self.phase)
+        };
         self.phase += core::f32::consts::TAU * f32::from(n.hz) / SAMPLE_RATE as f32;
         if self.phase > core::f32::consts::TAU {
             self.phase -= core::f32::consts::TAU;

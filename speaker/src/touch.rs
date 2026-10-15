@@ -16,7 +16,11 @@ const INFO_DATA_READY: u8 = 0x08;
 const MAX_POINTS: usize = 10;
 const POINT_DOWN: u8 = 0x80;
 
-async fn read(i2c: &mut I2c<'static, Async>, reg: u16, buf: &mut [u8]) -> Result<(), esp_hal::i2c::master::Error> {
+async fn read(
+    i2c: &mut I2c<'static, Async>,
+    reg: u16,
+    buf: &mut [u8],
+) -> Result<(), esp_hal::i2c::master::Error> {
     i2c.write_read_async(ADDR, &reg.to_be_bytes(), buf).await
 }
 

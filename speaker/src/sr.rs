@@ -28,8 +28,12 @@ const HEADER: usize = 8;
 unsafe fn alloc(size: usize, align: usize, caps: u32) -> *mut c_void {
     let align = align.max(4);
     let pad = HEADER.next_multiple_of(align);
-    let Some(total) = size.checked_add(pad) else { return ptr::null_mut() };
-    let Ok(layout) = Layout::from_size_align(total, align) else { return ptr::null_mut() };
+    let Some(total) = size.checked_add(pad) else {
+        return ptr::null_mut();
+    };
+    let Ok(layout) = Layout::from_size_align(total, align) else {
+        return ptr::null_mut();
+    };
     let internal = caps & (MALLOC_CAP_INTERNAL | MALLOC_CAP_DMA) != 0;
     let order: &[EnumSet<MemoryCapability>] = if caps & MALLOC_CAP_SPIRAM != 0 {
         &[EnumSet::only(MemoryCapability::External)]
@@ -140,7 +144,9 @@ unsafe extern "C" fn heap_caps_malloc(size: usize, caps: u32) -> *mut c_void {
 
 #[unsafe(no_mangle)]
 unsafe extern "C" fn heap_caps_calloc(n: usize, size: usize, caps: u32) -> *mut c_void {
-    let Some(bytes) = n.checked_mul(size) else { return ptr::null_mut() };
+    let Some(bytes) = n.checked_mul(size) else {
+        return ptr::null_mut();
+    };
     let p = unsafe { alloc(bytes, 4, caps) };
     if !p.is_null() {
         // SAFETY: the block holds `bytes` bytes.
@@ -158,8 +164,15 @@ unsafe extern "C" fn heap_caps_aligned_alloc(align: usize, size: usize, caps: u3
 }
 
 #[unsafe(no_mangle)]
-unsafe extern "C" fn heap_caps_aligned_calloc(align: usize, n: usize, size: usize, caps: u32) -> *mut c_void {
-    let Some(bytes) = n.checked_mul(size) else { return ptr::null_mut() };
+unsafe extern "C" fn heap_caps_aligned_calloc(
+    align: usize,
+    n: usize,
+    size: usize,
+    caps: u32,
+) -> *mut c_void {
+    let Some(bytes) = n.checked_mul(size) else {
+        return ptr::null_mut();
+    };
     let p = unsafe { heap_caps_aligned_alloc(align, bytes, caps) };
     if !p.is_null() {
         // SAFETY: the block holds `bytes` bytes.
@@ -189,7 +202,12 @@ extern "C" fn heap_caps_get_largest_free_block(caps: u32) -> usize {
 /// Prints text from the C side: a log line when `tag` is set, else raw
 /// `printf` output.
 #[unsafe(no_mangle)]
-unsafe extern "C" fn speaker_sr_print(level: c_int, tag: *const c_char, text: *const u8, len: usize) {
+unsafe extern "C" fn speaker_sr_print(
+    level: c_int,
+    tag: *const c_char,
+    text: *const u8,
+    len: usize,
+) {
     // SAFETY: the C side passes `len` readable bytes.
     let bytes = unsafe { core::slice::from_raw_parts(text, len) };
     let s = core::str::from_utf8(bytes).unwrap_or("<not UTF-8>");
@@ -236,36 +254,74 @@ fn requantize(x: i64, shift: c_int) -> i16 {
 /// The dot product of `a` and `b` (`len` items each) into `out`, scaled by
 /// 2^-shift: esp-dl's `dl::base::dotprod` overloads. ESP-SR's speech
 /// features call the float one; the integer ones are only linked.
-unsafe fn dot<A: Copy + Into<i64>, B: Copy + Into<i64>>(a: *const A, b: *const B, out: *mut i16, len: c_int, shift: c_int) {
+unsafe fn dot<A: Copy + Into<i64>, B: Copy + Into<i64>>(
+    a: *const A,
+    b: *const B,
+    out: *mut i16,
+    len: c_int,
+    shift: c_int,
+) {
     let len = len.max(0) as usize;
     // SAFETY: the caller passes `len` items in both inputs.
-    let (a, b) = unsafe { (core::slice::from_raw_parts(a, len), core::slice::from_raw_parts(b, len)) };
+    let (a, b) = unsafe {
+        (
+            core::slice::from_raw_parts(a, len),
+            core::slice::from_raw_parts(b, len),
+        )
+    };
     let sum: i64 = a.iter().zip(b).map(|(&x, &y)| x.into() * y.into()).sum();
     // SAFETY: the caller passes a valid output.
     unsafe { *out = requantize(sum, shift) };
 }
 
 #[unsafe(export_name = "_ZN2dl4base7dotprodEPaS1_Psii")]
-unsafe extern "C" fn dotprod_i8_i8(a: *const i8, b: *const i8, out: *mut i16, len: c_int, shift: c_int) {
+unsafe extern "C" fn dotprod_i8_i8(
+    a: *const i8,
+    b: *const i8,
+    out: *mut i16,
+    len: c_int,
+    shift: c_int,
+) {
     unsafe { dot(a, b, out, len, shift) }
 }
 
 #[unsafe(export_name = "_ZN2dl4base7dotprodEPaPsS2_ii")]
-unsafe extern "C" fn dotprod_i8_i16(a: *const i8, b: *const i16, out: *mut i16, len: c_int, shift: c_int) {
+unsafe extern "C" fn dotprod_i8_i16(
+    a: *const i8,
+    b: *const i16,
+    out: *mut i16,
+    len: c_int,
+    shift: c_int,
+) {
     unsafe { dot(a, b, out, len, shift) }
 }
 
 #[unsafe(export_name = "_ZN2dl4base7dotprodEPsS1_S1_ii")]
-unsafe extern "C" fn dotprod_i16_i16(a: *const i16, b: *const i16, out: *mut i16, len: c_int, shift: c_int) {
+unsafe extern "C" fn dotprod_i16_i16(
+    a: *const i16,
+    b: *const i16,
+    out: *mut i16,
+    len: c_int,
+    shift: c_int,
+) {
     unsafe { dot(a, b, out, len, shift) }
 }
 
 #[unsafe(export_name = "_ZN2dl4base7dotprodEPfS1_S1_ii")]
-unsafe extern "C" fn dotprod_f32(a: *const f32, b: *const f32, out: *mut f32, len: c_int, _shift: c_int) {
+unsafe extern "C" fn dotprod_f32(
+    a: *const f32,
+    b: *const f32,
+    out: *mut f32,
+    len: c_int,
+    _shift: c_int,
+) {
     let len = len.max(0) as usize;
     // SAFETY: the caller passes `len` items in both inputs and a valid output.
     unsafe {
-        let (a, b) = (core::slice::from_raw_parts(a, len), core::slice::from_raw_parts(b, len));
+        let (a, b) = (
+            core::slice::from_raw_parts(a, len),
+            core::slice::from_raw_parts(b, len),
+        );
         *out = a.iter().zip(b).map(|(x, y)| x * y).sum();
     }
 }

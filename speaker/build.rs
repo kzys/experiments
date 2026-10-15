@@ -37,7 +37,14 @@ fn main() {
         .include(dl_fft.join("base/isa"))
         .file("csrc/sr_glue.c")
         .file(vendor.join("cjson/cJSON/cJSON.c"));
-    for f in ["dl_fft_f32.c", "dl_fft_s16.c", "dl_rfft_f32.c", "dl_rfft_s16.c", "dl_fft_s32.c", "dl_rfft_s32.c"] {
+    for f in [
+        "dl_fft_f32.c",
+        "dl_fft_s16.c",
+        "dl_rfft_f32.c",
+        "dl_rfft_s16.c",
+        "dl_fft_s32.c",
+        "dl_rfft_s32.c",
+    ] {
         c.file(dl_fft.join(f));
     }
     for f in [
@@ -67,7 +74,15 @@ fn main() {
     let glue = out.join("libsr_glue.a");
     keep_literals_near(&glue, &glue);
     println!("cargo:rustc-link-arg=-Wl,--start-group");
-    for lib in ["sr_glue", "wakenet", "dl_lib", "c_speech_features", "hufzip", "c", "m"] {
+    for lib in [
+        "sr_glue",
+        "wakenet",
+        "dl_lib",
+        "c_speech_features",
+        "hufzip",
+        "c",
+        "m",
+    ] {
         println!("cargo:rustc-link-arg=-l{lib}");
     }
     println!("cargo:rustc-link-arg=-Wl,--end-group");
