@@ -362,13 +362,14 @@ BOOKS = [h(0xC83838), h(0x3870C8), h(0xE8B838), h(0x48A048), h(0x8858C0), h(0xE0
 
 
 def bookshelf(img, x, floor):
-    w, hh = 22, 27
+    w, hh, depth = 22, 24, 2
     t = floor - hh
+    oblique(img, x, t, w, hh, depth, WOOD)
     img.box(x, t, w, hh, h(0x583018), INK)
     img.fill(x + 1, t + 1, 2, hh - 2, WOOD["dark"])
     img.fill(x + w - 3, t + 1, 2, hh - 2, WOOD["dark"])
     img.fill(x + 1, t + 1, w - 2, 1, WOOD["light"])
-    shelves = [t + 9, t + 17, floor - 2]
+    shelves = [t + 8, t + 15, floor - 2]
     for sy in shelves:
         img.fill(x + 1, sy, w - 2, 1, WOOD["light"])
         img.fill(x + 1, sy + 1, w - 2, 1, WOOD["base"])
@@ -377,7 +378,7 @@ def bookshelf(img, x, floor):
         end = x + w - 3 - (4 if n == 1 else 0)
         while bx < end - 1:
             bw = 2 + hsh(bx, n) % 2
-            bh = 5 + hsh(n, bx) % 3
+            bh = 5 + hsh(n, bx) % 2
             if bx + bw > end:
                 break
             c = BOOKS[hsh(bx * 3, sy) % len(BOOKS)]
@@ -392,30 +393,32 @@ def bookshelf(img, x, floor):
             for k in range(6):
                 img.fill(end - 1 + k // 2, sy - 1 - k, 2, 1, BOOKS[1])
             img.fill(end + 2, sy - 4, 1, 4, METAL["base"])
-    # On top: a small plant and a vase.
-    blob(img, x + 6, t - 4, 3, LEAF)
-    img.box(x + 4, t - 2, 5, 3, POT["base"], INK)
-    img.box(x + 14, t - 6, 4, 7, h(0x5878C8), INK)
-    img.set(x + 15, t - 5, h(0xA0B8F0))
-    img.set(x + 15, t - 8, h(0xF87068))
-    img.set(x + 16, t - 9, h(0xF8D048))
+    # On top, standing on the middle of its depth: a small plant and a vase.
+    ox, oy = x - 1, t - 1
+    blob(img, ox + 6, oy - 4, 3, LEAF)
+    img.box(ox + 4, oy - 2, 5, 3, POT["base"], INK)
+    img.box(ox + 14, oy - 6, 4, 7, h(0x5878C8), INK)
+    img.set(ox + 15, oy - 5, h(0xA0B8F0))
+    img.set(ox + 15, oy - 8, h(0xF87068))
+    img.set(ox + 16, oy - 9, h(0xF8D048))
 
 
 def water_cooler(img, x, floor):
     # Cabinet with hot and cold taps and a drip tray.
-    cx0, cw, ch = x + 5, 12, 15
+    cx0, cw, ch, depth = x + 5, 12, 15, 2
     ct = floor - ch
-    img.box(cx0, ct, cw, ch, METAL["light"], INK)
+    oblique(img, cx0, ct, cw, ch, depth, {"light": h(0xFFFFFF), "base": METAL["light"], "dark": METAL["base"]})
     img.fill(cx0 + cw - 2, ct + 1, 1, ch - 2, METAL["base"])
     img.fill(cx0 + 1, ct + 6, cw - 2, 1, METAL["base"])
     img.set(cx0 + 3, ct + 3, h(0xF84838))
     img.set(cx0 + 8, ct + 3, h(0x3870C8))
     img.fill(cx0 + 2, ct + 5, cw - 4, 1, h(0x383040))
     img.fill(cx0 + 2, floor - 3, cw - 4, 1, METAL["base"])
-    # The bottle, upside down: neck into the cabinet, water nearly full.
-    bx, bw, bh = cx0 + 1, 10, 12
-    bt = ct - bh
-    img.fill(bx + 3, ct - 1, 4, 2, h(0x3870C8))
+    # The bottle, upside down, on the middle of the cabinet's top: neck
+    # into it, water nearly full.
+    bx, bw, bh = cx0, 10, 12
+    bt = ct - 1 - bh
+    img.fill(bx + 3, ct - 2, 4, 2, h(0x3870C8))
     img.box(bx, bt, bw, bh, h(0x70B0E8), INK)
     img.fill(bx + 1, bt + 1, bw - 2, 2, h(0xC0E0F8))
     img.fill(bx + 1, bt + 3, bw - 2, 1, h(0x4890D0))
@@ -430,13 +433,14 @@ def water_cooler(img, x, floor):
 
 def coffee_machine(img, x, floor):
     # Cabinet with two doors.
-    img.box(x + 1, floor - 12, 20, 12, WOOD["base"], INK)
-    img.fill(x + 2, floor - 11, 18, 1, WOOD["light"])
-    img.fill(x + 11, floor - 10, 1, 9, INK)
-    img.set(x + 9, floor - 6, METAL["light"])
-    img.set(x + 13, floor - 6, METAL["light"])
-    # The machine: dark body, display, buttons, a carafe of coffee.
-    mx, mt = x + 4, floor - 25
+    oblique(img, x + 2, floor - 12, 20, 12, 2, WOOD)
+    img.fill(x + 3, floor - 11, 18, 1, WOOD["light"])
+    img.fill(x + 12, floor - 10, 1, 9, INK)
+    img.set(x + 10, floor - 6, METAL["light"])
+    img.set(x + 14, floor - 6, METAL["light"])
+    # The machine, on the middle of the cabinet's top: dark body, display,
+    # buttons, a carafe of coffee.
+    mx, mt = x + 4, floor - 26
     img.box(mx, mt, 14, 13, h(0x383040), INK)
     img.fill(mx + 1, mt + 1, 12, 1, h(0x585068))
     img.fill(mx + 2, mt + 3, 4, 2, h(0x204828))
@@ -542,6 +546,25 @@ def sign(img, x, y, rows, c):
         img.set(px, py, c)
 
 
+def oblique(img, x, y, w, hh, depth, r):
+    """A solid box in oblique projection, as the desks are drawn: its front
+    face `w` x `hh` at (`x`, `y`) in `r["base"]`, its top a strip `depth` rows
+    deep in `r["light"]` and its left side in `r["dark"]`, both receding to the
+    upper left, one pixel left per row: the side's bottom edge rises as it
+    goes back, as its top does."""
+    bottom = y + hh
+    for k in range(depth):
+        x0 = x - k
+        img.fill(x0 + 1, y - 1 - k, w - 1, 1, r["light"])
+        img.set(x0, y - 1 - k, INK)
+        img.set(x0 + w, y - 1 - k, INK)
+    img.fill(x - depth, y - depth - 1, w + 1, 1, INK)
+    for k in range(1, depth + 1):
+        img.fill(x - k, y - k + 1, 1, bottom - y - 2, r["dark"])
+        img.set(x - k, bottom - 1 - k, INK)
+    img.fill(x - depth, y - depth, 1, bottom - y, INK)
+    img.box(x, y, w, hh, r["base"], INK)
+
 def desk(img, cx, top, lit, i, occupied):
     """A workstation in front of the agent's right half: a solid desk in
     oblique projection, receding to the upper left, so its top shows as a
@@ -556,19 +579,7 @@ def desk(img, cx, top, lit, i, occupied):
     # Back on the desk: one pixel left per row of the top's depth.
     mx = cx + 3 - depth
     base = front - depth
-    # Top surface: each row further back sits one pixel further left.
-    for k in range(depth):
-        y = front - 1 - k
-        x0 = dx0 - k
-        img.fill(x0 + 1, y, dw - 1, 1, WOOD["light"])
-        img.set(x0, y, INK)
-        img.set(x0 + dw, y, INK)
-    img.fill(dx0 - depth, front - depth - 1, dw + 1, 1, INK)
-    # Left side face, then the front panel down to the floor.
-    for k in range(1, depth + 1):
-        img.fill(dx0 - k, front - k + 1, 1, floor - front + k - 1, WOOD["dark"])
-    img.fill(dx0 - depth, front - depth, 1, floor - front + depth, INK)
-    img.box(dx0, front, dw, floor - front, WOOD["base"], INK)
+    oblique(img, dx0, front, dw, floor - front, depth, WOOD)
     img.fill(dx0 + 1, front, dw - 2, 1, WOOD["dark"])
     img.fill(dx0 + 5, front + 2, 8, 1, WOOD["dark"])
     # Monitor on a short stand standing on the back row of the top.
@@ -668,12 +679,13 @@ def lobby(img, number=True):
     # Reception: a counter with panels, a bell, a screen and a vase.
     rx, rw, rh = 60, 44, 13
     rt = floor - rh
-    img.box(rx - 1, rt - 1, rw + 2, 3, WOOD["light"], INK)
-    img.box(rx, rt + 1, rw, rh - 1, WOOD["base"], INK)
+    oblique(img, rx, rt, rw, rh, 3, WOOD)
     for k in range(3):
-        img.box(rx + 3 + k * 14, rt + 4, 11, rh - 7, WOOD["base"], WOOD["dark"])
-        img.fill(rx + 4 + k * 14, rt + 5, 9, 1, WOOD["light"])
+        img.box(rx + 3 + k * 14, rt + 3, 11, rh - 6, WOOD["base"], WOOD["dark"])
+        img.fill(rx + 4 + k * 14, rt + 4, 9, 1, WOOD["light"])
     img.fill(rx + 1, floor - 2, rw - 2, 1, WOOD["dark"])
+    # On the counter's top, a row back: a screen, a bell and a vase.
+    rx, rt = rx - 1, rt - 1
     img.box(rx + 6, rt - 9, 9, 8, METAL["base"], INK)
     img.fill(rx + 7, rt - 8, 7, 1, METAL["light"])
     img.fill(rx + 9, rt - 1, 3, 1, INK)
@@ -691,10 +703,7 @@ def lobby(img, number=True):
     plant(img, 232, floor, 1.15)
     # A bench with slats on metal legs.
     bx0, bw = 140, 34
-    for k in range(2):
-        img.fill(bx0, floor - 9 + k * 2, bw, 1, INK)
-        img.fill(bx0 + 1, floor - 8 + k * 2, bw - 2, 1, WOOD["light"] if k == 0 else WOOD["base"])
-    img.fill(bx0, floor - 5, bw, 1, INK)
+    oblique(img, bx0, floor - 7, bw, 3, 2, WOOD)
     for lx in (bx0 + 3, bx0 + bw - 5):
         img.fill(lx, floor - 4, 2, 4, METAL["dark"])
         img.fill(lx, floor - 1, 2, 1, INK)
