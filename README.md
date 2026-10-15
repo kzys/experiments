@@ -22,3 +22,11 @@ WakeNet. Tabs for the LED, the microphone, tones and the wake word.
 
 See [speaker/README.md](speaker/README.md) for how ESP-SR runs without
 ESP-IDF and how to build and flash it.
+
+## music
+
+A Jellyfin audio client for the Anbernic RG35xx Plus handheld running
+ROCKNIX: an egui UI driven by the gamepad, with playback through mpv.
+
+See [music/README.md](music/README.md) for what works and how to build and
+install it.
