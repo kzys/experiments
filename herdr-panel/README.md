@@ -76,6 +76,7 @@ halo).
 | `storey-0.png` .. `storey-3.png` | a storey's room, one wallpaper per workspace in turn, 320x36, with no desks and the lamps off |
 | `roof-on.png`, `roof-off.png` | the roof, its antenna light on and off, 320x22 |
 | `sprites.png` | the small sprites, decor and mascot, on one sheet; `sprites.yaml` gives each one's `[x, y, width, height]` |
+| `font-5x8.bdf` | the text font: X11's public-domain misc-fixed 5x8, ASCII only; read by the art scripts |
 
 The sprites in `sprites.png`:
 
@@ -87,7 +88,7 @@ The sprites in `sprites.png`:
 | `decor-0` .. `decor-3` | bookshelf, water cooler, plant, coffee machine: one per storey in turn, at its right end |
 | `car` | the elevator car |
 | `arrow-up`, `arrow-down` | the scroll buttons, 14x14 |
-| `digits` | 0 to 9 for storey numbers, 4x6 each, in a row |
+| `digits` | 0 to 9 for storey numbers, 5x8 each, in a row |
 | `plumbob` | the marker over the focused agent |
 | `mascot-working`, `mascot-idle`, `mascot-awake`, `mascot-blocked`, `mascot-done`, `mascot-unknown` | the mascot's animations: frames of 30x26 in a row, as many as the strip is wide |
 

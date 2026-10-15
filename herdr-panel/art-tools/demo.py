@@ -126,37 +126,40 @@ ALERT = h(0xF80048)
 SPARK = h(0xF8E820)
 QUESTION = h(0xC0C0C0)
 
-FONT = {
-    "0": ["###", "#.#", "#.#", "#.#", "###"],
-    "1": [".#.", "##.", ".#.", ".#.", "###"],
-    "2": ["###", "..#", "###", "#..", "###"],
-    "3": ["###", "..#", ".##", "..#", "###"],
-    "4": ["#.#", "#.#", "###", "..#", "..#"],
-    "5": ["###", "#..", "###", "..#", "###"],
-    "6": ["###", "#..", "###", "#.#", "###"],
-    "7": ["###", "..#", "..#", ".#.", ".#."],
-    "8": ["###", "#.#", "###", "#.#", "###"],
-    "9": ["###", "#.#", "###", "..#", "###"],
-    "H": ["#.#", "#.#", "###", "#.#", "#.#"],
-    "E": ["###", "#..", "##.", "#..", "###"],
-    "R": ["##.", "#.#", "##.", "#.#", "#.#"],
-    "D": ["##.", "#.#", "#.#", "#.#", "##."],
-    "L": ["#..", "#..", "#..", "#..", "###"],
-    "O": ["###", "#.#", "#.#", "#.#", "###"],
-    "B": ["##.", "#.#", "##.", "#.#", "##."],
-    "Y": ["#.#", "#.#", ".#.", ".#.", ".#."],
-    " ": ["...", "...", "...", "...", "..."],
-}
+def load_font(path):
+    """Reads a BDF font whose glyphs all fill the cell, as X11's misc-fixed
+    ones do, into rows of '#' and '.' per character."""
+    font, ch, rows = {}, None, None
+    for line in open(path):
+        word, _, arg = line.strip().partition(" ")
+        if word == "ENCODING":
+            ch = chr(int(arg))
+        elif word == "BITMAP":
+            rows = []
+        elif word == "ENDCHAR":
+            font[ch], rows = rows, None
+        elif rows is not None:
+            bits = int(word, 16) >> (len(word) * 4 - FONT_W)
+            rows.append("".join("#" if bits >> (FONT_W - 1 - x) & 1 else "." for x in range(FONT_W)))
+    return font
+
+
+# X11's misc-fixed 5x8, ASCII only. Capitals and digits are 4x6 with their
+# top at row 1; descenders reach row 7.
+FONT_W, FONT_H = 5, 8
+FONT = load_font(os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "assets", "font-5x8.bdf"))
 
 
 def text(img, x, y, s, c, shadow=None):
+    """Writes `s` with its cells' top left at (`x`, `y`), with a drop shadow
+    a pixel down and right if `shadow`."""
     for i, ch in enumerate(s):
         for dy, row in enumerate(FONT[ch]):
             for dx, p in enumerate(row):
                 if p == "#":
                     if shadow:
-                        img.set(x + i * 4 + dx + 1, y + dy + 1, shadow)
-                    img.set(x + i * 4 + dx, y + dy, c)
+                        img.set(x + i * FONT_W + dx + 1, y + dy + 1, shadow)
+                    img.set(x + i * FONT_W + dx, y + dy, c)
 
 
 # Layout, as in the firmware at 1:1 with 33x36 per agent.
@@ -248,7 +251,8 @@ def shell(img, top, paper, level, number=True):
     img.fill(SHAFT_X, top + INNER, SHAFT_W, 1, STONE["light"])
     if number:
         label = str(level)
-        text(img, SHAFT_X + SHAFT_W // 2 - 2 * len(label) + 1, top + 2, label, h(0xF8B040), h(0x582810))
+        x = SHAFT_X + SHAFT_W // 2 - (FONT_W * len(label) - 1) // 2
+        text(img, x, top + 1, label, h(0xF8B040), h(0x582810))
 
 
 def window(img, cx, top, level, i):
@@ -733,8 +737,8 @@ def roof(img, top_storey, light=True):
     t = storey_top(top_storey) - 13
     hgt = 14
     sign_x = 140
-    for y in range(t, t + hgt - 3):
-        for x in range(sign_x - 4, sign_x + 30):
+    for y in range(t - 2, t + hgt - 3):
+        for x in range(sign_x - 4, sign_x + 34):
             img.blend(x, y, NEON, 0.12)
     img.box(0, t + hgt - 4, W, 4, STONE["base"], INK)
     img.fill(1, t + hgt - 3, W - 2, 1, STONE["light"])
@@ -749,9 +753,9 @@ def roof(img, top_storey, light=True):
     for k in range(3):
         img.fill(62 + k * 4, t + 6, 2, 3, METAL["dark"])
     img.fill(sign_x + 6, t + 9, 1, 1, INK)
-    img.fill(sign_x + 20, t + 9, 1, 1, INK)
-    img.box(sign_x, t + 1, 27, 8, h(0x281828), INK)
-    text(img, sign_x + 4, t + 2, "HERDR", NEON)
+    img.fill(sign_x + 23, t + 9, 1, 1, INK)
+    img.box(sign_x, t - 1, 30, 10, h(0x281828), INK)
+    text(img, sign_x + 3, t, "HERDR", NEON)
     ax = W - 24
     img.fill(ax, t - 6, 1, hgt + 2, METAL["base"])
     img.fill(ax - 2, t - 2, 5, 1, METAL["base"])

@@ -364,16 +364,20 @@ pub fn decor(kind: usize, lit: bool) -> Image {
     img
 }
 
+/// The width of a digit in a storey number: a cell of the 5x8 font.
+pub const DIGIT_W: i32 = 5;
+
 /// The digits 0 to 9 for storey numbers, cut from the `digits` strip.
 pub fn digits() -> [Image; 10] {
     let sheet = sprite(|s| s.digits);
-    core::array::from_fn(|d| sheet.crop(4 * d, 0, 4, sheet.h))
+    let w = DIGIT_W as usize;
+    core::array::from_fn(|d| sheet.crop(w * d, 0, w, sheet.h))
 }
 
 /// Where the first of a storey number's `len` digits goes, relative to the
-/// storey; each next digit goes 4 pixels to the right.
+/// storey; each next digit goes [`DIGIT_W`] pixels to the right.
 pub fn number_at(len: usize) -> (i32, i32) {
-    (SHAFT_X + SHAFT_W / 2 - 2 * len as i32 + 1, 2)
+    (SHAFT_X + SHAFT_W / 2 - (DIGIT_W * len as i32 - 1) / 2, 1)
 }
 
 /// The roof over the top storey, its antenna light on in frame 0 and off in
@@ -525,7 +529,7 @@ mod tests {
         for up in [true, false] {
             assert_eq!(size(&arrow(up)), (ARROW_SIZE, ARROW_SIZE));
         }
-        assert_eq!(size(&sprite(|s| s.digits)), (40, 6));
+        assert_eq!(size(&sprite(|s| s.digits)), (10 * DIGIT_W as usize, 8));
         assert_eq!(sprite(|s| s.lamp_on).w as i32, 2 * LAMP_CENTRE + 1);
         assert_eq!(car().h as i32, CAR_H);
         for k in 0..DECORS {
@@ -699,7 +703,7 @@ mod tests {
         for len in 1..=2 {
             let (x, _) = number_at(len);
             assert!(
-                x >= SHAFT_X && x + 4 * len as i32 <= SHAFT_X + SHAFT_W,
+                x >= SHAFT_X && x + DIGIT_W * len as i32 <= SHAFT_X + SHAFT_W,
                 "{len} digits at {x}"
             );
         }
