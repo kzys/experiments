@@ -1,0 +1,14 @@
+[build]
+target = "xtensa-esp32s3-none-elf"
+
+[target.xtensa-esp32s3-none-elf]
+runner = "espflash flash --monitor --chip esp32s3"
+linker = "xtensa-esp32s3-elf-gcc"
+rustflags = ["-C", "link-arg=-nostartfiles"]
+
+[env]
+DEP_LV_CONFIG_PATH = { value = "conf", relative = true }
+ESP_LOG = "info"
+
+[unstable]
+build-std = ["alloc", "core"]
