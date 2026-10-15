@@ -2,16 +2,25 @@
 //! herdr-panel-scene --example preview -- out.png 2,1,8 [scroll]` shows
 //! three workspaces with two, one and eight agents, in varying states, scrolled
 //! up by `scroll` art pixels (default 0, the bottom). The first agent is
-//! focused.
+//! focused. Workspaces take their labels from a made-up list in turn.
 
 use std::{env, fs::File, io::BufWriter};
 
 use herdr_panel_protocol::Status;
 use herdr_panel_scene::{
-    CAR_AT, DECOR_AT, DECORS, DESKS_PER_STOREY, GROUND_Y, PLUMBOB_ABOVE, SCALE, animation,
-    backdrop, behind_desk, car, decor, digits, lobby, number_at, plumbob, roof, roof_top, slot,
-    storey, storey_top, street,
+    CAR_AT, DECOR_AT, DECORS, DESKS_PER_STOREY, DIGIT_W, GROUND_Y, PLUMBOB_ABOVE, SCALE, animation,
+    backdrop, behind_desk, car, decor, digits, label, label_at, lobby, number_at, plumbob, roof,
+    roof_top, slot, storey, storey_top, street,
 };
+
+/// Workspace labels.
+const NAMES: [&str; 5] = [
+    "herdr-panel",
+    "dotfiles",
+    "~",
+    "statusline",
+    "jumpy fog: QRS 0123",
+];
 
 fn main() {
     let args: Vec<String> = env::args().collect();
@@ -56,10 +65,17 @@ fn main() {
         let lit = agents.iter().any(|s| *s != Status::Idle);
         img.draw(&storey(*ws, lit), 0, top);
         img.draw(&decor(level % DECORS, lit), DECOR_AT.0, top + DECOR_AT.1);
-        let label = level.to_string();
-        let (nx, ny) = number_at(label.len());
-        for (i, d) in label.bytes().enumerate() {
-            img.draw(&digits[(d - b'0') as usize], nx + 4 * i as i32, top + ny);
+        let name = NAMES[*ws % NAMES.len()];
+        let (lx, ly) = label_at(name.len());
+        img.draw(&label(name), lx - 1, top + ly - 1);
+        let number = level.to_string();
+        let (nx, ny) = number_at(number.len());
+        for (i, d) in number.bytes().enumerate() {
+            img.draw(
+                &digits[(d - b'0') as usize],
+                nx + DIGIT_W * i as i32,
+                top + ny,
+            );
         }
         for (i, b) in agents.iter().enumerate() {
             let s = slot(i);

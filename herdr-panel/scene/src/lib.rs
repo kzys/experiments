@@ -364,16 +364,126 @@ pub fn decor(kind: usize, lit: bool) -> Image {
     img
 }
 
+/// The width of a digit in a storey number: a cell of the 5x8 font.
+pub const DIGIT_W: i32 = FONT_W as i32;
+
+/// The size of a character cell of the text font, X11's misc-fixed 5x8, and
+/// how far its base line is above the cell's bottom.
+pub const FONT_W: usize = 5;
+pub const FONT_H: usize = 8;
+pub const FONT_DESCENT: usize = 1;
+
+/// A character of the text font: its rows from the top, the leftmost pixel
+/// in the top bit.
+pub type Glyph = [u8; FONT_H];
+
+/// A character with a pixel of outline all round: [`FONT_W`] + 2 by
+/// [`FONT_H`] + 2, the outline and the character together, its top left
+/// pixel a pixel up and left of the character's cell.
+pub type Outline = [u8; FONT_H + 2];
+
+/// The text font's characters for ASCII ' ' to '~', in order, from
+/// `font-5x8.bdf`.
+pub fn font() -> Vec<Glyph> {
+    let mut glyphs = vec![None; 95];
+    let mut code = None;
+    let mut rows: Option<Vec<u8>> = None;
+    for line in include_str!("../../assets/font-5x8.bdf").lines() {
+        let (word, arg) = line.split_once(' ').unwrap_or((line, ""));
+        match word {
+            "ENCODING" => code = arg.parse::<usize>().ok(),
+            "BITMAP" => rows = Some(Vec::new()),
+            "ENDCHAR" => {
+                let rows = rows.take().expect("ENDCHAR without BITMAP");
+                let c = code.expect("glyph without ENCODING");
+                let glyph: Glyph = rows.try_into().expect("glyph is not 8 rows");
+                glyphs[c - 32] = Some(glyph);
+            }
+            _ => {
+                if let Some(rows) = &mut rows {
+                    rows.push(u8::from_str_radix(word, 16).expect("bad bitmap row"));
+                }
+            }
+        }
+    }
+    glyphs
+        .into_iter()
+        .enumerate()
+        .map(|(i, g)| g.unwrap_or_else(|| panic!("font lacks {:?}", (i as u8 + 32) as char)))
+        .collect()
+}
+
+/// `glyph`'s pixels and every pixel next to one, across, down or
+/// diagonally.
+pub fn outline(glyph: &Glyph) -> Outline {
+    let mut out = [0; FONT_H + 2];
+    for (y, row) in glyph.iter().enumerate() {
+        let wide = row | row >> 1 | row >> 2;
+        for o in &mut out[y..y + 3] {
+            *o |= wide;
+        }
+    }
+    out
+}
+
+/// The colours of a workspace's label on its storeys: the characters, and
+/// their outline.
+pub const LABEL_COLOUR: Rgba = [0xd0, 0xd0, 0xd0, 0xff];
+pub const LABEL_OUTLINE: Rgba = [0x18, 0x10, 0x20, 0xff];
+/// Where a label's last character cell ends at the right, and where its
+/// cells' tops are, relative to the storey: at the top of the rooms, above the
+/// mascots, just left of the decor.
+pub const LABEL_END: (i32, i32) = (DECOR_AT.0, 1);
+
+/// Where the first character cell of a label of `len` characters goes,
+/// relative to the storey.
+pub fn label_at(len: usize) -> (i32, i32) {
+    (LABEL_END.0 - (FONT_W * len) as i32, LABEL_END.1)
+}
+
+/// `text` in the text font, outlined, as on a storey; characters outside
+/// ASCII show as '?'. The first character cell is at (1, 1).
+pub fn label(text: &str) -> Image {
+    let font = font();
+    let glyphs: Vec<&Glyph> = text
+        .chars()
+        .map(|c| match c {
+            ' '..='~' => &font[c as usize - 32],
+            _ => &font[b'?' as usize - 32],
+        })
+        .collect();
+    let mut img = Image::new(FONT_W * glyphs.len() + 2, FONT_H + 2);
+    let mut put = |x0: usize, rows: &[u8], c: Rgba| {
+        for (y, row) in rows.iter().enumerate() {
+            for x in 0..8 {
+                if row & 0x80 >> x != 0 {
+                    img.set((x0 + x) as i32, y as i32, c);
+                }
+            }
+        }
+    };
+    for (i, g) in glyphs.iter().enumerate() {
+        put(FONT_W * i, &outline(g), LABEL_OUTLINE);
+    }
+    for (i, g) in glyphs.iter().enumerate() {
+        let mut shifted = [0; FONT_H + 2];
+        shifted[1..=FONT_H].copy_from_slice(&g.map(|r| r >> 1));
+        put(FONT_W * i, &shifted, LABEL_COLOUR);
+    }
+    img
+}
+
 /// The digits 0 to 9 for storey numbers, cut from the `digits` strip.
 pub fn digits() -> [Image; 10] {
     let sheet = sprite(|s| s.digits);
-    core::array::from_fn(|d| sheet.crop(4 * d, 0, 4, sheet.h))
+    let w = DIGIT_W as usize;
+    core::array::from_fn(|d| sheet.crop(w * d, 0, w, sheet.h))
 }
 
 /// Where the first of a storey number's `len` digits goes, relative to the
-/// storey; each next digit goes 4 pixels to the right.
+/// storey; each next digit goes [`DIGIT_W`] pixels to the right.
 pub fn number_at(len: usize) -> (i32, i32) {
-    (SHAFT_X + SHAFT_W / 2 - 2 * len as i32 + 1, 2)
+    (SHAFT_X + SHAFT_W / 2 - (DIGIT_W * len as i32 - 1) / 2, 1)
 }
 
 /// The roof over the top storey, its antenna light on in frame 0 and off in
@@ -525,7 +635,7 @@ mod tests {
         for up in [true, false] {
             assert_eq!(size(&arrow(up)), (ARROW_SIZE, ARROW_SIZE));
         }
-        assert_eq!(size(&sprite(|s| s.digits)), (40, 6));
+        assert_eq!(size(&sprite(|s| s.digits)), (10 * DIGIT_W as usize, 8));
         assert_eq!(sprite(|s| s.lamp_on).w as i32, 2 * LAMP_CENTRE + 1);
         assert_eq!(car().h as i32, CAR_H);
         for k in 0..DECORS {
@@ -695,11 +805,79 @@ mod tests {
     }
 
     #[test]
+    fn the_font_has_every_ascii_character() {
+        let font = font();
+        assert_eq!(font.len(), 95);
+        assert_eq!(font[0], [0; FONT_H], "space");
+        assert!(font[1..].iter().all(|g| *g != [0; FONT_H]));
+    }
+
+    #[test]
+    fn an_outline_surrounds_its_character() {
+        // A dot at (1, 2) becomes a 3x3 block whose middle is the dot.
+        let mut dot = [0; FONT_H];
+        dot[2] = 0x40;
+        let mut block = [0; FONT_H + 2];
+        block[2..5].copy_from_slice(&[0x70; 3]);
+        assert_eq!(outline(&dot), block);
+    }
+
+    #[test]
+    fn labels_are_outlined_text() {
+        let img = label("Hi");
+        assert_eq!(size(&img), (2 * FONT_W + 2, FONT_H + 2));
+        let h = font()[b'H' as usize - 32];
+        for y in 0..FONT_H {
+            for x in 0..FONT_W {
+                let lit = h[y] & 0x80 >> x != 0;
+                let c = img.get(x + 1, y + 1);
+                assert_eq!(c == LABEL_COLOUR, lit, "({x}, {y})");
+                if !lit && outline(&h)[y + 1] & 0x80 >> (x + 1) != 0 {
+                    assert_eq!(c, LABEL_OUTLINE, "({x}, {y})");
+                }
+            }
+        }
+        assert_eq!(label("é"), label("?"));
+    }
+
+    #[test]
+    fn labels_fit_above_the_mascots() {
+        // A full label, outline and all, is between the shaft and the decor.
+        let len = herdr_panel_protocol::LABEL_LEN;
+        let (x, y) = label_at(len);
+        let (first, last) = drawn_columns(&label(&"W".repeat(len)));
+        assert!(x - 1 + first > ROOMS_X && x - 1 + last < DECOR_AT.0);
+        // Its outline ends above every mascot frame's first drawn row.
+        let bottom = y - 1 + FONT_H as i32 + 2;
+        for (name, frames) in all_animations() {
+            for (i, f) in frames.iter().enumerate() {
+                let top = (0..f.h).find(|&y| (0..f.w).any(|x| f.get(x, y)[3] != 0));
+                let top = slot(0).mascot.1 + top.unwrap() as i32;
+                assert!(bottom <= top, "{name} frame {i} starts at {top}");
+            }
+        }
+    }
+
+    #[test]
+    fn digits_are_in_the_text_font() {
+        let font = font();
+        for (d, img) in digits().iter().enumerate() {
+            let g = font[b'0' as usize - 32 + d];
+            for y in 0..FONT_H {
+                for x in 0..FONT_W {
+                    let lit = g[y] & 0x80 >> x != 0;
+                    assert_eq!(img.get(x, y) == snes([0xf8, 0xb0, 0x40, 0xff]), lit, "{d}");
+                }
+            }
+        }
+    }
+
+    #[test]
     fn numbers_fit_the_shaft() {
         for len in 1..=2 {
             let (x, _) = number_at(len);
             assert!(
-                x >= SHAFT_X && x + 4 * len as i32 <= SHAFT_X + SHAFT_W,
+                x >= SHAFT_X && x + DIGIT_W * len as i32 <= SHAFT_X + SHAFT_W,
                 "{len} digits at {x}"
             );
         }

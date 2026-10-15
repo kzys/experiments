@@ -43,6 +43,9 @@ pub struct Agent {
     pub id: Id,
     /// Caption: the agent's name if it has one, else its workspace's label.
     pub label: Label,
+    /// Its workspace's label; empty from a bridge that does not send it.
+    #[serde(default)]
+    pub workspace: Label,
     pub status: Status,
     pub focused: bool,
 }
@@ -155,7 +158,12 @@ pub struct Storey<'a> {
     pub agents: &'a [Agent],
 }
 
-impl Storey<'_> {
+impl<'a> Storey<'a> {
+    /// The workspace's label.
+    pub fn label(&self) -> &'a str {
+        self.agents.first().map_or("", |a| a.workspace.as_str())
+    }
+
     /// Whether the storey's lights are on: someone there is not idle, or
     /// has the focus.
     pub fn lit(&self) -> bool {
@@ -207,6 +215,7 @@ mod tests {
             .push(Agent {
                 id: truncated("w1:p1"),
                 label: truncated("herdr-panel"),
+                workspace: truncated("herdr-panel"),
                 status: Status::Working,
                 focused: true,
             })
@@ -214,7 +223,8 @@ mod tests {
         agents
             .push(Agent {
                 id: truncated("w2:p1"),
-                label: truncated("dotfiles"),
+                label: truncated("reviewer"),
+                workspace: truncated("dotfiles"),
                 status: Status::Idle,
                 focused: false,
             })
@@ -234,11 +244,21 @@ mod tests {
             lines(&sample()),
             [
                 r#"{"Begin":{"count":2}}"#,
-                r#"{"Agent":{"id":"w1:p1","label":"herdr-panel","status":"working","focused":true}}"#,
-                r#"{"Agent":{"id":"w2:p1","label":"dotfiles","status":"idle","focused":false}}"#,
+                r#"{"Agent":{"id":"w1:p1","label":"herdr-panel","workspace":"herdr-panel","status":"working","focused":true}}"#,
+                r#"{"Agent":{"id":"w2:p1","label":"reviewer","workspace":"dotfiles","status":"idle","focused":false}}"#,
                 r#""End""#,
             ]
         );
+    }
+
+    #[test]
+    fn an_agent_without_a_workspace_has_an_empty_one() {
+        let line = r#"{"Agent":{"id":"w1:p1","label":"x","status":"idle","focused":false}}"#;
+        let (msg, _) = serde_json_core::from_str::<ToBoard>(line).unwrap();
+        let ToBoard::Agent(agent) = msg else {
+            panic!("{msg:?}");
+        };
+        assert_eq!(agent.workspace, "");
     }
 
     #[test]
@@ -327,6 +347,7 @@ mod tests {
             .map(|id| Agent {
                 id: truncated(id),
                 label: Label::new(),
+                workspace: truncated(workspace(id)),
                 status: Status::Idle,
                 focused: false,
             })
@@ -370,6 +391,13 @@ mod tests {
     }
 
     #[test]
+    fn a_storey_has_its_workspace_label() {
+        let a = agents(&["w1:p1", "w1:p2", "w2:p1"]);
+        let labels: std::vec::Vec<&str> = storeys(&a, 1).map(|s| s.label()).collect();
+        assert_eq!(labels, ["w1", "w1", "w2"]);
+    }
+
+    #[test]
     fn a_storey_is_lit_unless_everyone_idles_unfocused() {
         let mut a = agents(&["w1:p1", "w1:p2"]);
         let lit = |a: &[Agent]| storeys(a, 6).next().unwrap().lit();
@@ -395,6 +423,7 @@ mod tests {
                 .push(Agent {
                     id: truncated("wXXXXXXXXXX:pNNNN"),
                     label: truncated("a-long-agent-label-of-24"),
+                    workspace: truncated("a-long-workspace-label24"),
                     status: if i % 2 == 0 {
                         Status::Unknown
                     } else {

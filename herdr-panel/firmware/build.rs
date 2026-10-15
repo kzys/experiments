@@ -4,6 +4,7 @@
 //! frame (cut where its desk hides it). Each is written as
 //! a PNG at screen size, converted with LVGL's `LVGLImage.py` (needs Python
 //! with `pypng` and `lz4`) into an `lv_image_dsc_t`, and compiled in.
+//! The text font, and its outline, become LVGL fonts in C, compiled in too.
 //! `frames.rs`, included by the firmware, declares them, lists each
 //! animation's frames and says where everything goes.
 
@@ -19,8 +20,9 @@ use std::{
 use herdr_panel_protocol::Status;
 use herdr_panel_scene::{
     ARROW_SIZE, ARROW_X, CAR_AT, DECOR_AT, DECORS, DESK_SPACING, DESKS_PER_STOREY, DESKS_X,
-    GROUND_Y, Image, PLUMBOB_ABOVE, ROOF_H, SCALE, STOREY_H, WALLPAPERS, animation, arrow,
-    awake_animation, backdrop, behind_desk, car, decor, digits, lobby, number_at, plumbob, roof,
+    FONT_DESCENT, FONT_H, FONT_W, GROUND_Y, Image, LABEL_COLOUR, LABEL_END, LABEL_OUTLINE,
+    PLUMBOB_ABOVE, ROOF_H, SCALE, STOREY_H, WALLPAPERS, animation, arrow, awake_animation,
+    backdrop, behind_desk, car, decor, digits, font, lobby, number_at, outline, plumbob, roof,
     slot, storey, street,
 };
 use oxivgl_build::ImageConfig;
@@ -81,6 +83,64 @@ fn convert(cfg: &ImageConfig, out: &Path, symbol: &str, png: &Path, cf: &str) {
         .include(&cfg.lv_conf_dir)
         .opt_level(2)
         .compile(&format!("lvgl_img_{symbol}"));
+}
+
+/// Writes an LVGL font named `symbol` for ASCII ' ' to '~' and compiles it.
+/// Each of `glyphs` is a character's rows from the top, the leftmost pixel
+/// in the top bit, `box_w` (at most 8) wide; its bottom `descent` rows are
+/// below the base line. Characters are [`FONT_W`] apart whatever their size,
+/// so a font of outlines lines up with the text font.
+fn lvgl_font(
+    cfg: &ImageConfig,
+    out: &Path,
+    symbol: &str,
+    glyphs: &[&[u8]],
+    box_w: usize,
+    descent: usize,
+) {
+    let box_h = glyphs[0].len();
+    let mut bitmap = String::new();
+    let mut dscs = String::from("    {0},\n");
+    let mut index = 0;
+    for g in glyphs {
+        assert_eq!(g.len(), box_h);
+        for row in *g {
+            write!(bitmap, "0x{row:02x}, ").unwrap();
+        }
+        writeln!(
+            dscs,
+            "    {{.bitmap_index = {index}, .adv_w = {adv}, .box_w = {box_w}, .box_h = {box_h}, .ofs_x = 0, .ofs_y = -{descent}}},",
+            adv = FONT_W * 16,
+        )
+        .unwrap();
+        index += box_h;
+    }
+    let c = format!(
+        "#include \"lvgl.h\"\n\n\
+         static const uint8_t bitmap[] = {{{bitmap}}};\n\n\
+         static const lv_font_fmt_txt_glyph_dsc_t glyphs[] = {{\n{dscs}}};\n\n\
+         static const lv_font_fmt_txt_cmap_t cmaps[] = {{\n\
+         \x20   {{.range_start = 32, .range_length = {n}, .glyph_id_start = 1, .unicode_list = NULL,\n\
+         \x20    .glyph_id_ofs_list = NULL, .list_length = 0, .type = LV_FONT_FMT_TXT_CMAP_FORMAT0_TINY}},\n}};\n\n\
+         /* A byte per row: stride 1. */\n\
+         static const lv_font_fmt_txt_dsc_t dsc = {{\n\
+         \x20   .glyph_bitmap = bitmap, .glyph_dsc = glyphs, .cmaps = cmaps, .kern_dsc = NULL,\n\
+         \x20   .kern_scale = 0, .cmap_num = 1, .bpp = 1, .kern_classes = 0, .bitmap_format = 0, .stride = 1,\n}};\n\n\
+         const lv_font_t {symbol} = {{\n\
+         \x20   .get_glyph_dsc = lv_font_get_glyph_dsc_fmt_txt, .get_glyph_bitmap = lv_font_get_bitmap_fmt_txt,\n\
+         \x20   .line_height = {box_h}, .base_line = {descent}, .subpx = LV_FONT_SUBPX_NONE,\n\
+         \x20   .underline_position = -1, .underline_thickness = 1, .dsc = &dsc,\n}};\n",
+        n = glyphs.len(),
+    );
+    let file = out.join(format!("{symbol}.c"));
+    fs::write(&file, c).unwrap();
+    cc::Build::new()
+        .file(file)
+        .define("LV_LVGL_H_INCLUDE_SIMPLE", None)
+        .include(&cfg.lvgl_include_dir)
+        .include(&cfg.lv_conf_dir)
+        .opt_level(2)
+        .compile(&format!("lvgl_font_{symbol}"));
 }
 
 fn main() {
@@ -201,6 +261,28 @@ fn main() {
         .unwrap();
     }
 
+    // Text is drawn by LVGL at the font's size, not scaled.
+    assert_eq!(SCALE, 1);
+    let glyphs = font();
+    let outlines: Vec<_> = glyphs.iter().map(outline).collect();
+    lvgl_font(
+        &cfg,
+        &out,
+        "label_font",
+        &glyphs.iter().map(|g| &g[..]).collect::<Vec<_>>(),
+        FONT_W,
+        FONT_DESCENT,
+    );
+    lvgl_font(
+        &cfg,
+        &out,
+        "label_outline_font",
+        &outlines.iter().map(|g| &g[..]).collect::<Vec<_>>(),
+        FONT_W + 2,
+        FONT_DESCENT + 1,
+    );
+    let hex = |c: [u8; 4]| format!("0x{:02x}{:02x}{:02x}", c[0], c[1], c[2]);
+
     let scale = SCALE as i32;
     let at = |(x, y): (i32, i32)| format!("({}, {})", x * scale, y * scale);
     let mut slots = String::new();
@@ -269,6 +351,24 @@ fn main() {
          /// digits; each digit is `DIGIT_W` pixels wide.\n\
          pub const NUMBER_AT: [(i32, i32); 3] = [{number_at}];\n\
          pub const DIGIT_W: i32 = {digit_w};\n\
+         unsafe extern \"C\" {{\n\
+         \x20   static label_font: u8;\n\
+         \x20   static label_outline_font: u8;\n\
+         }}\n\
+         /// The text font, for workspace labels, and the outline drawn under\n\
+         /// its characters: a label in each, the outline's a pixel up and left\n\
+         /// and 2 pixels wider and taller.\n\
+         pub static LABEL_FONT: oxivgl::fonts::Font =\n\
+         \x20   unsafe {{ oxivgl::fonts::Font::from_extern(core::ptr::addr_of!(label_font) as *const ()) }};\n\
+         pub static LABEL_OUTLINE_FONT: oxivgl::fonts::Font =\n\
+         \x20   unsafe {{ oxivgl::fonts::Font::from_extern(core::ptr::addr_of!(label_outline_font) as *const ()) }};\n\
+         pub const FONT_W: i32 = {FONT_W};\n\
+         pub const FONT_H: i32 = {FONT_H};\n\
+         /// Where a workspace label's last character cell ends at the right, and\n\
+         /// where its cells' tops are, relative to the storey; and its colours.\n\
+         pub const LABEL_END: (i32, i32) = {label_end};\n\
+         pub const LABEL_COLOUR: u32 = {label_colour};\n\
+         pub const LABEL_OUTLINE: u32 = {label_outline};\n\
          /// Where the agents at each desk go, relative to the storey.\n\
          pub const SLOTS: [Slot; {DESKS_PER_STOREY}] = [\n{slots}];\n",
         n = ANIMATIONS.len(),
@@ -297,6 +397,9 @@ fn main() {
         decor_at = at(DECOR_AT),
         plumbob_above = PLUMBOB_ABOVE * scale,
         number_at = number_at.join(", "),
+        label_end = at(LABEL_END),
+        label_colour = hex(LABEL_COLOUR),
+        label_outline = hex(LABEL_OUTLINE),
     );
     fs::write(out.join("frames.rs"), source).unwrap();
 }

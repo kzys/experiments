@@ -10,7 +10,7 @@ import sys
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 _src = open(os.path.join(HERE, "demo.py")).read().replace("\nmain()\n", "\n")
-d = {}
+d = {"__file__": os.path.join(HERE, "demo.py")}
 exec(compile(_src, "demo.py", "exec"), d)
 Img, W, H = d["Img"], d["W"], d["H"]
 INNER, STOREY, GROUND = d["INNER"], d["STOREY"], d["GROUND"]
@@ -124,10 +124,11 @@ def sprites():
     img = Img(5, 7)
     img.grid(0, 0, d["PLUMBOB"], {"#": d["h"](0x084018), "L": d["h"](0xB8FFA8), "G": d["h"](0x48D848), "D": d["h"](0x209030)})
     out["plumbob"] = img
-    # Digits 0 to 9, 4x6 each with their drop shadow, in a row.
-    img = Img(40, 6)
+    # Digits 0 to 9 in a row, a font cell each with their drop shadow.
+    fw, fh = d["FONT_W"], d["FONT_H"]
+    img = Img(10 * fw, fh)
     for n in range(10):
-        d["text"](img, 4 * n, 0, str(n), d["h"](0xF8B040), d["h"](0x582810))
+        d["text"](img, fw * n, 0, str(n), d["h"](0xF8B040), d["h"](0x582810))
     out["digits"] = img
     # Decor for each storey's right end: bookshelf, water cooler, plant,
     # coffee machine.

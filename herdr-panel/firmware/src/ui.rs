@@ -13,7 +13,7 @@
 //! follows the focused agent, unless an arrow was pressed in the last
 //! [`MANUAL_SCROLL_HOLD_SECS`] seconds.
 
-use alloc::vec::Vec;
+use alloc::{string::String, vec::Vec};
 use embassy_time::Instant;
 use herdr_panel_protocol::{Id, State, Status, ToHost, storeys};
 use oxivgl::{
@@ -21,14 +21,16 @@ use oxivgl::{
     enums::{EventCode, ObjFlag, ScrollbarMode},
     event::Event,
     indev::PointerIndev,
+    style::{Selector, Style},
     view::{NavAction, View, register_event_on},
-    widgets::{AnimImg, AsLvHandle, Image, Obj, WidgetError},
+    widgets::{AnimImg, AsLvHandle, Image, Label, Obj, WidgetError},
 };
 
 use crate::{
     frames::{
         ARROW_SIZE, ARROW_X, CAR_AT, DECOR_AT, DECORS, DESK_SPACING, DESKS_PER_STOREY, DESKS_X,
-        DIGIT_W, GROUND_Y, Loop, NUMBER_AT, PLUMBOB_ABOVE, PLUMBOB_W, ROOF_H, SLOTS, STOREY_H,
+        DIGIT_W, FONT_H, FONT_W, GROUND_Y, LABEL_COLOUR, LABEL_END, LABEL_FONT, LABEL_OUTLINE,
+        LABEL_OUTLINE_FONT, Loop, NUMBER_AT, PLUMBOB_ABOVE, PLUMBOB_W, ROOF_H, SLOTS, STOREY_H,
         arrow_down_image, arrow_up_image, awake, backdrop_image, car_image, decor_image,
         digit_image, lobby_image, loops, plumbob, roof, storey_image, street_image,
     },
@@ -70,6 +72,7 @@ fn desk_under(x: i32, y: i32) -> Option<(usize, usize)> {
 struct Rendered {
     images: Vec<Image<'static>>,
     sprites: Vec<AnimImg<'static>>,
+    labels: Vec<Label<'static>>,
     /// The agents on each storey above the lobby, by desk.
     storeys: Vec<Vec<Id>>,
 }
@@ -88,6 +91,9 @@ pub struct Panel {
     plumbob: Option<Loop>,
     awake: Option<Loop>,
     roof: Option<Loop>,
+    /// The styles of a workspace label's text and of its outline.
+    label_style: Style,
+    outline_style: Style,
     /// How far the content is shifted down so that it starts at 0: what
     /// "the view at the bottom" adds to every y.
     offset: i32,
@@ -114,6 +120,13 @@ impl Panel {
             plumbob: None,
             awake: None,
             roof: None,
+            label_style: Style::new(|s| {
+                s.text_font(LABEL_FONT).text_color_hex(LABEL_COLOUR);
+            }),
+            outline_style: Style::new(|s| {
+                s.text_font(LABEL_OUTLINE_FONT)
+                    .text_color_hex(LABEL_OUTLINE);
+            }),
             offset: 0,
             follow: None,
             manual_scroll: None,
@@ -188,6 +201,7 @@ impl Panel {
                 DECOR_AT.0,
                 top + DECOR_AT.1,
             )?);
+            self.label(&mut r, storey.label(), top)?;
             r.storeys
                 .push(storey.agents.iter().map(|a| a.id.clone()).collect());
             if storey.agents.iter().any(|a| a.focused) {
@@ -312,6 +326,36 @@ impl Panel {
                 top + y,
             )?);
         }
+        Ok(())
+    }
+
+    /// Puts a workspace's label `text`, outlined, at the top right of its
+    /// storey, the storey's top being `top`. Characters outside ASCII show as
+    /// '?'.
+    fn label(&self, r: &mut Rendered, text: &str, top: i32) -> Result<(), WidgetError> {
+        let Some(scroller) = &self.scroller else {
+            return Ok(());
+        };
+        if text.is_empty() {
+            return Ok(());
+        }
+        let text: String = text
+            .chars()
+            .map(|c| if (' '..='~').contains(&c) { c } else { '?' })
+            .collect();
+        let (x, y) = (LABEL_END.0 - FONT_W * text.len() as i32, top + LABEL_END.1);
+        let outline = Label::new(scroller)?;
+        outline.add_style(&self.outline_style, Selector::DEFAULT);
+        outline.text(&text);
+        // Wider than the characters' advances, so the last one's outline is not cut.
+        outline.size(FONT_W * text.len() as i32 + 2, FONT_H + 2);
+        outline.pos(x - 1, y - 1);
+        r.labels.push(outline);
+        let label = Label::new(scroller)?;
+        label.add_style(&self.label_style, Selector::DEFAULT);
+        label.text(&text);
+        label.pos(x, y);
+        r.labels.push(label);
         Ok(())
     }
 
