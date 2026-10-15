@@ -5,8 +5,14 @@ BIN    := target/$(TARGET)/release/music
 
 .PHONY: all install install-config clean
 
+# CI has no aarch64 toolchain, so it only checks that a native build works.
+ifdef CI
+all:
+	cargo build --locked
+else
 all:
 	cargo build --release --target $(TARGET)
+endif
 
 install: all
 	-ssh $(HOST) 'kill $$(pidof music) 2>/dev/null; sleep 1'
