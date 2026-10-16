@@ -121,6 +121,8 @@ LAMP = h(0xFFF0A0)
 WARM = h(0xFFD890)
 MOON = h(0xF8F0D0)
 MOONLIGHT = h(0x5868B0)
+# What a space with its lights off is multiplied by in daylight.
+SHADE = h(0xA0A0B8)
 # The sky at each time of day, from the top of the screen down to the
 # ground: its colours, how many stars show (0 to 1), and what hangs in it.
 TIMES = {
@@ -216,6 +218,10 @@ WALL, SHAFT_X, SHAFT_W = 4, 4, 14
 ROOMS_X = SHAFT_X + SHAFT_W + 1
 ROOMS_END = W - WALL
 DESKS_X, SPACING, DESKS = ROOMS_X + 1, 33, 8
+# A storey holds two spaces of 4 desks, a workspace's or part of one, with
+# a partition between them at SPLIT.
+SPACE_DESKS = 4
+SPLIT = DESKS_X + SPACING * SPACE_DESKS - 1
 
 
 def storey_top(level):
@@ -378,14 +384,27 @@ def bricks(img, x, y, w, hh):
             img.set(xx, yy, c)
 
 
+def wallpaper(img, top, x0, x1, paper):
+    """The wallpaper `paper` from `x0` to `x1` in the storey whose top is
+    `top`: a frieze at the top and a dado below."""
+    w = x1 - x0
+    img.fill(x0, top, w, INNER, paper["base"])
+    img.fill(x0, top, w, 2, paper["dark"])
+    img.fill(x0, top + INNER - 9, w, 9, paper["dark"])
+    img.fill(x0, top + INNER - 9, w, 1, paper["light"])
+
+
+def partition(img, top):
+    """The wall between a storey's two spaces, at SPLIT."""
+    img.fill(SPLIT, top, 1, INNER, INK)
+    img.fill(SPLIT + 1, top, 1, INNER, h(0xF8F0E8))
+
+
 def shell(img, top, paper, level, number=True):
     """Walls, shaft, wallpaper and floor of the storey whose top is `top`,
     with its number on the shaft if `number`."""
     rooms_w = ROOMS_END - ROOMS_X
-    img.fill(ROOMS_X, top, rooms_w, INNER, paper["base"])
-    img.fill(ROOMS_X, top, rooms_w, 2, paper["dark"])
-    img.fill(ROOMS_X, top + INNER - 9, rooms_w, 9, paper["dark"])
-    img.fill(ROOMS_X, top + INNER - 9, rooms_w, 1, paper["light"])
+    wallpaper(img, top, ROOMS_X, ROOMS_END, paper)
     bricks(img, 0, top, WALL, STOREY)
     bricks(img, ROOMS_END, top, WALL, STOREY)
     img.fill(0, top, 1, STOREY, INK)
@@ -430,8 +449,12 @@ def lamp_light(img, x, top):
             img.blend(xx, y, WARM, 0.12)
 
 
-def lamps(img, top, lit):
+def lamps(img, top, lit, side=None, split=True):
+    """The lamp fittings between desks, of space `side` (0 left, 1 right) or
+    of both; lit if `lit`. If `split`, none hangs on the partition."""
     for i in range(1, DESKS):
+        if split and i == SPACE_DESKS or side is not None and i // SPACE_DESKS != side:
+            continue
         x = DESKS_X + SPACING * i
         img.set(x, top, INK)
         img.fill(x - 2, top + 1, 5, 1, INK)
@@ -779,41 +802,69 @@ def agent(img, cx, top, state, frame=0):
 PLUMBOB = ["..#..", ".#L#.", ".LG#.", "#LGD#", ".GD#.", ".#D#.", "..#.."]
 
 
-def storey(img, level, paper, agents, focus=None):
+def tint(img, top, x0, x1, c):
+    """Multiplies the storey whose top is `top`, from `x0` to `x1`, by `c`."""
+    for y in range(top, top + INNER + 1):
+        for x in range(x0, x1):
+            p = img.get(x, y)
+            img.set(x, y, tuple(p[k] * c[k] // 255 for k in range(3)) + (255,))
+
+
+def storey(img, level, spaces):
+    """Storey `level` with its two `spaces`, left and right: each a
+    (wallpaper, agent states, index of the focused agent or None), or None
+    if empty. A space where every agent is idle and none has the focus has
+    its lights off: moonlit at night, in shade by day."""
     top = storey_top(level)
-    # The focused agent is awake, and keeps its storey's lights on.
-    if focus is not None and agents[focus] == "idle":
-        agents = agents[:focus] + ["awake"] + agents[focus + 1 :]
-    lit = focus is not None or any(s != "idle" for s in agents)
-    p = WALLPAPER[paper % len(WALLPAPER)]
-    shell(img, top, p, level)
+    spaces = [s or (spaces[0][0], [], None) for s in spaces]
+    shell(img, top, WALLPAPER[spaces[0][0] % len(WALLPAPER)], level)
+    wallpaper(img, top, SPLIT, ROOMS_END, WALLPAPER[spaces[1][0] % len(WALLPAPER)])
+    partition(img, top)
     for i in range(DESKS):
         window(img, desk_centre(i), top, level, i)
     decor(img, top, level % 4)
-    for i, state in enumerate(agents):
-        agent(img, desk_centre(i), top, state, frame=i)
-    for i in range(DESKS):
-        desk(img, desk_centre(i), top, lit, i + level, i < len(agents))
-    if lit:
-        lamps(img, top, True)
-    elif TIME != "night":
-        # By day a room with the lights off is just that.
-        lamps(img, top, False)
-    else:
-        for y in range(top, top + INNER + 1):
-            for x in range(ROOMS_X, ROOMS_END):
-                c = img.get(x, y)
-                img.set(x, y, tuple(c[k] * MOONLIGHT[k] // 255 for k in range(3)) + (255,))
-        lamps(img, top, False)
-        for i in range(DESKS):
-            cx = desk_centre(i)
-            for y in range(top + 22, top + INNER):
-                s = (y - top - 22) // 2
-                for x in range(cx - 7 + s, cx + 8 + s):
-                    img.blend(x, y, h(0xA0B0F8), 0.12)
-    if focus is not None:
-        cx = desk_centre(focus)
-        img.grid(cx - 6, top + 4, PLUMBOB, {"#": h(0x084018), "L": h(0xB8FFA8), "G": h(0x48D848), "D": h(0x209030)})
+    for side, (paper, agents, focus) in enumerate(spaces):
+        first = SPACE_DESKS * side
+        # The focused agent is awake, and keeps its space's lights on.
+        if focus is not None and agents[focus] == "idle":
+            agents = agents[:focus] + ["awake"] + agents[focus + 1 :]
+        lit = focus is not None or any(s != "idle" for s in agents)
+        for i, state in enumerate(agents):
+            agent(img, desk_centre(first + i), top, state, frame=first + i)
+        for i in range(SPACE_DESKS):
+            desk(img, desk_centre(first + i), top, lit, first + i + level, i < len(agents))
+        x0, x1 = (ROOMS_X, SPLIT) if side == 0 else (SPLIT, ROOMS_END)
+        if lit:
+            lamps(img, top, True, side)
+        elif TIME != "night":
+            tint(img, top, x0, x1, SHADE)
+            lamps(img, top, False, side)
+        else:
+            tint(img, top, x0, x1, MOONLIGHT)
+            lamps(img, top, False, side)
+            for i in range(SPACE_DESKS):
+                cx = desk_centre(first + i)
+                for y in range(top + 22, top + INNER):
+                    s = (y - top - 22) // 2
+                    for x in range(cx - 7 + s, cx + 8 + s):
+                        img.blend(x, y, h(0xA0B0F8), 0.12)
+        if focus is not None:
+            cx = desk_centre(first + focus)
+            img.grid(cx - 6, top + 4, PLUMBOB, {"#": h(0x084018), "L": h(0xB8FFA8), "G": h(0x48D848), "D": h(0x209030)})
+
+
+def spaces_of(workspaces):
+    """Lays `workspaces`, each (wallpaper, agent states, focus), into spaces
+    of SPACE_DESKS desks in order, two to a storey: a list of storeys, each
+    [left, right]."""
+    spaces = []
+    for paper, agents, focus in workspaces:
+        for k in range(0, len(agents), SPACE_DESKS):
+            f = focus - k if focus is not None and k <= focus < k + SPACE_DESKS else None
+            spaces.append((paper, agents[k : k + SPACE_DESKS], f))
+    if len(spaces) % 2:
+        spaces.append(None)
+    return [spaces[k : k + 2] for k in range(0, len(spaces), 2)]
 
 
 def lobby(img, number=True):
@@ -877,7 +928,7 @@ def lobby(img, number=True):
         for k, part in enumerate(("light", "base", "base", "dark")):
             img.set(door_x - 3 + dx, top + 3 + k, stripe[part])
     img.fill(door_x - 3, top + 7, 46, 1, INK)
-    lamps(img, top, True)
+    lamps(img, top, True, split=False)
 
 
 def street(img):
@@ -993,19 +1044,23 @@ def main():
     clouds(img)
     street(img)
     lobby(img)
-    storeys = [
+    storeys = spaces_of([
         (0, ["working", "working", "blocked", "idle", "working", "done"], 1),
         (1, ["done", "working", "unknown", "working", "idle", "working", "working", "blocked"], None),
-        (2, ["idle", "idle", "idle", "idle"], None),
+        (2, ["idle", "idle", "idle"], None),
         (3, ["working", "blocked", "working", "working", "idle"], None),
         (0, ["unknown", "working", "done"], None),
-        (1, ["working", "idle", "working", "working", "working", "working", "done", "working"], None),
-        (2, ["blocked", "working"], None),
-        (3, ["working", "idle", "working"], None),
-        (0, ["working", "working", "idle", "done", "working"], None),
-    ]
-    for k, (paper, agents, focus) in enumerate(storeys):
-        storey(img, k + 1, paper, agents, focus)
+        (1, ["idle", "idle"], None),
+        (2, ["working", "idle", "working", "working", "working", "working", "done", "working"], None),
+        (3, ["blocked", "working"], None),
+        (0, ["idle", "idle", "idle", "idle"], None),
+        (1, ["working", "idle", "working"], None),
+        (2, ["working", "working", "idle", "done", "working"], None),
+        (3, ["idle"], None),
+        (0, ["working", "done"], None),
+    ])
+    for k, spaces in enumerate(storeys):
+        storey(img, k + 1, spaces)
     roof(img, len(storeys))
     car(img, 1)
     arrow(img, SHAFT_X, 6, True)

@@ -233,10 +233,18 @@ const SLAB: i32 = 3;
 /// Height of a storey's room, above the slab.
 const INNER: i32 = STOREY_H as i32 - SLAB;
 pub const DESKS_PER_STOREY: usize = 8;
+/// A storey holds two spaces of desks, left and right, each a workspace's or
+/// part of one, with a partition between them.
+pub const DESKS_PER_SPACE: usize = 4;
+pub const SPACES_PER_STOREY: usize = DESKS_PER_STOREY / DESKS_PER_SPACE;
 /// The desks start this far from a storey's left edge, one every
 /// `DESK_SPACING` pixels; for telling which desk a tap is on.
 pub const DESKS_X: i32 = ROOMS_X + 1;
 pub const DESK_SPACING: i32 = 33;
+/// Where each space starts, relative to the storey: the left one at the
+/// storey's left edge, the right one at the partition, which is drawn in it.
+pub const SPACE_X: [i32; SPACES_PER_STOREY] =
+    [0, DESKS_X + DESK_SPACING * DESKS_PER_SPACE as i32 - 1];
 /// Height of the roof, from the antenna's tip to the parapet, which overlaps
 /// the top storey by a pixel.
 pub const ROOF_H: usize = 22;
@@ -256,8 +264,9 @@ pub const ARROW_X: i32 = SHAFT_X;
 pub const CAR_AT: (i32, i32) = (SHAFT_X + 1, INNER - CAR_H);
 const CAR_H: i32 = 24;
 
-/// What a dark storey's room is multiplied by: moonlight blue.
+/// What a dark space is multiplied by: moonlight blue at night, shade by day.
 const MOONLIGHT: Rgba = [0x58, 0x68, 0xb0, 0xff];
+const SHADE: Rgba = [0xa0, 0xa0, 0xb8, 0xff];
 /// The middle column of the `lamp-on` sprite, which goes over each lamp fitting.
 const LAMP_CENTRE: i32 = 18;
 /// Where the `moonbeam` sprite goes, relative to the centre of a window.
@@ -357,55 +366,78 @@ fn desk_centre(i: usize) -> i32 {
     DESKS_X + DESK_SPACING * i as i32 + DESK_SPACING / 2
 }
 
-/// The lamp fittings, between the desks.
-fn lamp_xs() -> impl Iterator<Item = i32> {
-    (1..DESKS_PER_STOREY).map(|i| DESKS_X + DESK_SPACING * i as i32)
+/// The lamp fittings between the desks of space `side`; none hangs on the
+/// partition.
+fn lamp_xs(side: usize) -> impl Iterator<Item = i32> {
+    (1..DESKS_PER_SPACE).map(move |i| DESKS_X + DESK_SPACING * (DESKS_PER_SPACE * side + i) as i32)
 }
 
-/// `img` as seen by moonlight: every colour multiplied by moonlight blue.
-fn moonlit(img: &mut Image, x0: i32, x1: i32, rows: i32) {
+/// What a space with its lights off is multiplied by at `time`.
+fn dim(time: TimeOfDay) -> Rgba {
+    if time == TimeOfDay::Night {
+        MOONLIGHT
+    } else {
+        SHADE
+    }
+}
+
+/// `img` from `x0` to `x1` and down `rows`, every colour multiplied by `tint`.
+fn tinted(img: &mut Image, x0: i32, x1: i32, rows: i32, by: Rgba) {
     for y in 0..rows.min(img.h as i32) {
         for x in x0.max(0)..x1.min(img.w as i32) {
             let c = img.get(x as usize, y as usize);
             if c[3] != 0 {
-                let tint = |i: usize| (c[i] as u32 * MOONLIGHT[i] as u32 / 255) as u8;
+                let tint = |i: usize| (c[i] as u32 * by[i] as u32 / 255) as u8;
                 img.set(x, y, [tint(0), tint(1), tint(2), c[3]]);
             }
         }
     }
 }
 
-/// A storey of offices in wallpaper `paper` (counted modulo
-/// [`WALLPAPERS`]) at `time`, with its desks, and its lamps on if `lit`;
-/// otherwise, at night, the room is tinted by moonlight falling through the
-/// windows. Agents are drawn over it with [`behind_desk`]; its [`decor`] and
-/// number go on separately.
-pub fn storey(paper: usize, lit: bool, time: TimeOfDay) -> Image {
+/// Space `side` (0 left, 1 right) of a storey, in wallpaper `paper`
+/// (counted modulo [`WALLPAPERS`]) at `time`, with its desks, and its lamps
+/// on if `lit`; otherwise dim: in shade by day, and at night tinted by
+/// moonlight falling through the windows. It goes at [`SPACE_X`]; the left
+/// space includes the shaft and the right one the partition. Agents are
+/// drawn over it with [`behind_desk`]; the storey's [`decor`] and number go
+/// on separately.
+pub fn space(paper: usize, lit: bool, time: TimeOfDay, side: usize) -> Image {
     let mut img = room(paper, time);
     let desk = desk();
-    for i in 0..DESKS_PER_STOREY {
+    let desks = DESKS_PER_SPACE * side..DESKS_PER_SPACE * (side + 1);
+    for i in desks.clone() {
         let (dx, dy) = desk_at(i);
         img.draw(&desk, dx, dy);
     }
+    let x0 = SPACE_X[side];
+    let x1 = SPACE_X.get(side + 1).copied().unwrap_or(W as i32);
     if lit {
         let lamp = sprite(|s| s.lamp_on);
-        for x in lamp_xs() {
+        for x in lamp_xs(side) {
             img.draw(&lamp, x - LAMP_CENTRE, 0);
         }
-    } else if time == TimeOfDay::Night {
-        moonlit(&mut img, ROOMS_X, ROOMS_END, INNER + 1);
-        let beam = sprite(|s| s.moonbeam);
-        for i in 0..DESKS_PER_STOREY {
-            img.draw(&beam, desk_centre(i) + MOONBEAM_AT.0, MOONBEAM_AT.1);
+    } else {
+        tinted(
+            &mut img,
+            x0.max(ROOMS_X),
+            x1.min(ROOMS_END),
+            INNER + 1,
+            dim(time),
+        );
+        if time == TimeOfDay::Night {
+            let beam = sprite(|s| s.moonbeam);
+            for i in desks {
+                img.draw(&beam, desk_centre(i) + MOONBEAM_AT.0, MOONBEAM_AT.1);
+            }
         }
     }
-    img
+    img.crop(x0 as usize, 0, (x1 - x0) as usize, img.h)
 }
 
-/// Decor `kind` (counted modulo [`DECORS`]) for a storey's right end, lit or
-/// by moonlight; by day, a storey with its lights off shows it lit. It goes
-/// at [`DECOR_AT`].
-pub fn decor(kind: usize, lit: bool) -> Image {
+/// Decor `kind` (counted modulo [`DECORS`]) for a storey's right end, in
+/// the right space: lit, or dim as that space is at `time`. It goes at
+/// [`DECOR_AT`].
+pub fn decor(kind: usize, lit: bool, time: TimeOfDay) -> Image {
     let mut img = match kind % DECORS {
         0 => sprite(|s| s.decor_0),
         1 => sprite(|s| s.decor_1),
@@ -414,7 +446,7 @@ pub fn decor(kind: usize, lit: bool) -> Image {
     };
     if !lit {
         let (w, h) = (img.w as i32, img.h as i32);
-        moonlit(&mut img, 0, w, h);
+        tinted(&mut img, 0, w, h, dim(time));
     }
     img
 }
@@ -485,15 +517,17 @@ pub fn outline(glyph: &Glyph) -> Outline {
 /// their outline.
 pub const LABEL_COLOUR: Rgba = [0xd0, 0xd0, 0xd0, 0xff];
 pub const LABEL_OUTLINE: Rgba = [0x18, 0x10, 0x20, 0xff];
-/// Where a label's last character cell ends at the right, and where its
-/// cells' tops are, relative to the storey: at the top of the rooms, above the
-/// mascots, just left of the decor.
-pub const LABEL_END: (i32, i32) = (DECOR_AT.0, 1);
+/// Where the last character cell of each space's label ends at the right,
+/// relative to the storey: at the top of the rooms, above the mascots, just
+/// left of the partition or the decor.
+pub const LABEL_ENDS: [i32; SPACES_PER_STOREY] = [SPACE_X[1] - 1, DECOR_AT.0];
+/// Where labels' character cells' tops are, relative to the storey.
+pub const LABEL_Y: i32 = 1;
 
-/// Where the first character cell of a label of `len` characters goes,
-/// relative to the storey.
-pub fn label_at(len: usize) -> (i32, i32) {
-    (LABEL_END.0 - (FONT_W * len) as i32, LABEL_END.1)
+/// Where the first character cell of space `side`'s label of `len`
+/// characters goes, relative to the storey.
+pub fn label_at(len: usize, side: usize) -> (i32, i32) {
+    (LABEL_ENDS[side] - (FONT_W * len) as i32, LABEL_Y)
 }
 
 /// `text` in the text font, outlined, as on a storey; characters outside
@@ -699,7 +733,7 @@ mod tests {
         assert_eq!(sprite(|s| s.lamp_on).w as i32, 2 * LAMP_CENTRE + 1);
         assert_eq!(car().h as i32, CAR_H);
         for k in 0..DECORS {
-            let d = decor(k, true);
+            let d = decor(k, true, TimeOfDay::Night);
             assert!(
                 DECOR_AT.0 + d.w as i32 <= ROOMS_END + WALL && d.h as i32 <= INNER,
                 "decor {k}"
@@ -749,10 +783,12 @@ mod tests {
         for p in 0..WALLPAPERS {
             for lit in [true, false] {
                 for t in TimeOfDay::ALL {
-                    assert!(
-                        storey(p, lit, t).px.iter().all(|p| p[3] == 0xff),
-                        "storey {p} lit {lit} {t:?}"
-                    );
+                    for side in 0..SPACES_PER_STOREY {
+                        assert!(
+                            space(p, lit, t, side).px.iter().all(|p| p[3] == 0xff),
+                            "space {side} {p} lit {lit} {t:?}"
+                        );
+                    }
                 }
             }
         }
@@ -903,11 +939,14 @@ mod tests {
 
     #[test]
     fn labels_fit_above_the_mascots() {
-        // A full label, outline and all, is between the shaft and the decor.
+        // A full label, outline and all, is inside its space: between the
+        // shaft and the partition, or the partition and the decor.
         let len = herdr_panel_protocol::LABEL_LEN;
-        let (x, y) = label_at(len);
         let (first, last) = drawn_columns(&label(&"W".repeat(len)));
-        assert!(x - 1 + first > ROOMS_X && x - 1 + last < DECOR_AT.0);
+        let (x, _) = label_at(len, 0);
+        assert!(x - 1 + first > ROOMS_X && x - 1 + last < SPACE_X[1]);
+        let (x, y) = label_at(len, 1);
+        assert!(x - 1 + first > SPACE_X[1] + 1 && x - 1 + last < DECOR_AT.0);
         // Its outline ends above every mascot frame's first drawn row.
         let bottom = y - 1 + FONT_H as i32 + 2;
         for (name, frames) in all_animations() {
@@ -951,13 +990,41 @@ mod tests {
     }
 
     #[test]
-    fn lights_change_the_storey_and_decor_and_wallpapers_differ() {
+    fn lights_change_the_space_and_decor_and_wallpapers_differ() {
         let night = TimeOfDay::Night;
-        assert_ne!(storey(0, true, night), storey(0, false, night));
-        assert_ne!(storey(0, true, night), storey(1, true, night));
-        assert_eq!(storey(0, true, night), storey(WALLPAPERS, true, night));
-        assert_ne!(decor(0, true), decor(0, false));
-        assert_eq!(decor(0, true), decor(DECORS, true));
+        for side in 0..SPACES_PER_STOREY {
+            assert_ne!(space(0, true, night, side), space(0, false, night, side));
+            assert_ne!(space(0, true, night, side), space(1, true, night, side));
+            assert_eq!(
+                space(0, true, night, side),
+                space(WALLPAPERS, true, night, side)
+            );
+        }
+        for t in TimeOfDay::ALL {
+            assert_ne!(decor(0, true, t), decor(0, false, t));
+            assert_eq!(decor(0, true, t), decor(DECORS, true, t));
+        }
+        assert_ne!(decor(0, false, TimeOfDay::Day), decor(0, false, night));
+    }
+
+    #[test]
+    fn two_spaces_make_a_storey_split_between_desks() {
+        let (l, r) = (
+            space(0, true, TimeOfDay::Day, 0),
+            space(0, true, TimeOfDay::Day, 1),
+        );
+        assert_eq!(l.w + r.w, W);
+        assert_eq!(l.w as i32, SPACE_X[1]);
+        // The partition is between the left space's last desk and the right
+        // space's first one, and no lamp hangs on it.
+        assert!(desk_at(DESKS_PER_SPACE - 1).0 + DESK_W as i32 <= SPACE_X[1]);
+        assert!(desk_at(DESKS_PER_SPACE).0 > SPACE_X[1] + 1);
+        for side in 0..SPACES_PER_STOREY {
+            for x in lamp_xs(side) {
+                assert!(x < SPACE_X[1] - 1 || x > SPACE_X[1] + 2, "lamp at {x}");
+            }
+            assert_eq!(lamp_xs(side).count(), DESKS_PER_SPACE - 1);
+        }
     }
 
     #[test]
@@ -978,7 +1045,7 @@ mod tests {
     }
 
     #[test]
-    fn times_of_day_differ_and_only_night_is_moonlit() {
+    fn dark_spaces_are_moonlit_at_night_and_shaded_by_day() {
         let skies: Vec<Image> = TimeOfDay::ALL.map(backdrop).into();
         for (i, a) in skies.iter().enumerate() {
             for b in &skies[i + 1..] {
@@ -986,18 +1053,28 @@ mod tests {
             }
         }
         assert_ne!(
-            storey(0, true, TimeOfDay::Day),
-            storey(0, true, TimeOfDay::Night)
+            space(0, true, TimeOfDay::Day, 0),
+            space(0, true, TimeOfDay::Night, 0)
         );
-        // A dark storey's wallpaper and windows are the room's, untinted,
-        // except at night.
+        // A dark space's wallpaper and windows are dimmer than the room's,
+        // by day and by night, and moonlit only at night.
         let wall = (ROOMS_X as usize + 1, 25);
         let window = (desk_centre(0) as usize, 8);
         for t in TimeOfDay::ALL {
-            let (dark, room) = (storey(0, false, t), room(0, t));
+            let (dark, room) = (space(0, false, t, 0), room(0, t));
+            let by = if t == TimeOfDay::Night {
+                MOONLIGHT
+            } else {
+                SHADE
+            };
             for (x, y) in [wall, window] {
-                let same = dark.get(x, y) == room.get(x, y);
-                assert_eq!(same, t != TimeOfDay::Night, "{t:?} at ({x}, {y})");
+                let (d, r) = (dark.get(x, y), room.get(x, y));
+                let tinted = |i: usize| (r[i] as u32 * by[i] as u32 / 255) as u8;
+                assert_eq!(
+                    d,
+                    snes([tinted(0), tinted(1), tinted(2), 0xff]),
+                    "{t:?} at ({x}, {y})"
+                );
             }
         }
         assert!(clouds(TimeOfDay::Night).is_empty());

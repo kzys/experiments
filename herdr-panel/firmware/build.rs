@@ -1,5 +1,5 @@
 //! Links the ESP-HAL linker script and turns the art into LVGL images: the
-//! tower's backdrop and clouds and storeys at each time of day, street,
+//! tower's backdrop and clouds and storeys' spaces at each time of day, street,
 //! lobby, digits, roof and elevator, which
 //! the scene crate puts together from the PNGs in `assets/`, and each mascot
 //! frame (cut where its desk hides it). Each is written as
@@ -20,11 +20,11 @@ use std::{
 
 use herdr_panel_protocol::{Status, TimeOfDay};
 use herdr_panel_scene::{
-    ARROW_SIZE, ARROW_X, CAR_AT, CLOUDS, DECOR_AT, DECORS, DESK_SPACING, DESKS_PER_STOREY, DESKS_X,
-    FONT_DESCENT, FONT_H, FONT_W, GROUND_Y, Image, LABEL_COLOUR, LABEL_END, LABEL_OUTLINE,
-    PLUMBOB_ABOVE, ROOF_H, SCALE, STOREY_H, WALLPAPERS, animation, arrow, awake_animation,
-    backdrop, behind_desk, car, clouds, decor, digits, font, lobby, number_at, outline, plumbob,
-    roof, slot, storey, street,
+    ARROW_SIZE, ARROW_X, CAR_AT, CLOUDS, DECOR_AT, DECORS, DESK_SPACING, DESKS_PER_SPACE,
+    DESKS_PER_STOREY, DESKS_X, FONT_DESCENT, FONT_H, FONT_W, GROUND_Y, Image, LABEL_COLOUR,
+    LABEL_ENDS, LABEL_OUTLINE, LABEL_Y, PLUMBOB_ABOVE, ROOF_H, SCALE, SPACE_X, SPACES_PER_STOREY,
+    STOREY_H, WALLPAPERS, animation, arrow, awake_animation, backdrop, behind_desk, car, clouds,
+    decor, digits, font, lobby, number_at, outline, plumbob, roof, slot, space, street,
 };
 use oxivgl_build::ImageConfig;
 
@@ -244,31 +244,51 @@ fn main() {
     image("car", &car(), true);
     image("arrow_up", &arrow(true), true);
     image("arrow_down", &arrow(false), true);
-    let mut storeys = String::new();
+    let mut spaces = String::new();
     for paper in 0..WALLPAPERS {
         for lit in [false, true] {
             for t in TimeOfDay::ALL {
-                let symbol = format!(
-                    "storey_{paper}_{}_{}",
-                    if lit { "lit" } else { "dark" },
-                    t.name()
-                );
-                image(&symbol, &storey(paper, lit, t), false);
-                writeln!(
-                    storeys,
-                    "        ({paper}, {lit}, TimeOfDay::{t:?}) => {symbol}(),"
-                )
-                .unwrap();
+                for side in 0..SPACES_PER_STOREY {
+                    let symbol = format!(
+                        "space_{paper}_{}_{}_{side}",
+                        if lit { "lit" } else { "dark" },
+                        t.name()
+                    );
+                    image(&symbol, &space(paper, lit, t, side), false);
+                    writeln!(
+                        spaces,
+                        "        ({paper}, {lit}, TimeOfDay::{t:?}, {side}) => {symbol}(),"
+                    )
+                    .unwrap();
+                }
             }
         }
     }
+    // Decor dims as its space does: by moonlight at night, in shade by day.
     let mut decors = String::new();
     for kind in 0..DECORS {
-        for lit in [false, true] {
-            let symbol = format!("decor_{kind}_{}", if lit { "lit" } else { "dark" });
-            image(&symbol, &decor(kind, lit), true);
-            writeln!(decors, "        ({kind}, {lit}) => {symbol}(),").unwrap();
-        }
+        image(
+            &format!("decor_{kind}_lit"),
+            &decor(kind, true, TimeOfDay::Day),
+            true,
+        );
+        image(
+            &format!("decor_{kind}_moon"),
+            &decor(kind, false, TimeOfDay::Night),
+            true,
+        );
+        image(
+            &format!("decor_{kind}_shade"),
+            &decor(kind, false, TimeOfDay::Day),
+            true,
+        );
+        writeln!(
+            decors,
+            "        ({kind}, true, _) => decor_{kind}_lit(),\n\
+             \x20       ({kind}, false, TimeOfDay::Night) => decor_{kind}_moon(),\n\
+             \x20       ({kind}, false, _) => decor_{kind}_shade(),"
+        )
+        .unwrap();
     }
     let mut digit_arms = String::new();
     for (d, img) in digits().iter().enumerate() {
@@ -346,12 +366,14 @@ fn main() {
          pub fn cloud_image(time: TimeOfDay, k: usize) -> Option<&'static oxivgl::widgets::lv_image_dsc_t> {{\n\
          \x20   match (time, k) {{\n{cloud_arms}        _ => None,\n    }}\n}}\n\n\
          {street}{lobby}{car}{arrow_up}{arrow_down}\
-         /// A storey in wallpaper `paper` (modulo [`WALLPAPERS`]) at `time`, its lights on or off.\n\
-         pub fn storey_image(paper: usize, lit: bool, time: TimeOfDay) -> &'static oxivgl::widgets::lv_image_dsc_t {{\n\
-         \x20   match (paper % WALLPAPERS, lit, time) {{\n{storeys}        _ => unreachable!(),\n    }}\n}}\n\n\
-         /// Decor `kind` (modulo [`DECORS`]) for a storey's right end, lit or not.\n\
-         pub fn decor_image(kind: usize, lit: bool) -> &'static oxivgl::widgets::lv_image_dsc_t {{\n\
-         \x20   match (kind % DECORS, lit) {{\n{decors}        _ => unreachable!(),\n    }}\n}}\n\n\
+         /// Space `side` (0 left, 1 right) of a storey in wallpaper `paper` (modulo\n\
+         /// [`WALLPAPERS`]) at `time`, its lights on or off. It goes at [`SPACE_X`].\n\
+         pub fn space_image(paper: usize, lit: bool, time: TimeOfDay, side: usize) -> &'static oxivgl::widgets::lv_image_dsc_t {{\n\
+         \x20   match (paper % WALLPAPERS, lit, time, side) {{\n{spaces}        _ => unreachable!(),\n    }}\n}}\n\n\
+         /// Decor `kind` (modulo [`DECORS`]) for a storey's right end, lit or dim\n\
+         /// as its space is at `time`.\n\
+         pub fn decor_image(kind: usize, lit: bool, time: TimeOfDay) -> &'static oxivgl::widgets::lv_image_dsc_t {{\n\
+         \x20   match (kind % DECORS, lit, time) {{\n{decors}        _ => unreachable!(),\n    }}\n}}\n\n\
          /// Digit `d` (modulo 10) of a storey number.\n\
          pub fn digit_image(d: usize) -> &'static oxivgl::widgets::lv_image_dsc_t {{\n\
          \x20   match d % 10 {{\n{digit_arms}        _ => unreachable!(),\n    }}\n}}\n\n\
@@ -366,6 +388,11 @@ fn main() {
          /// Where a storey's decor goes, relative to the storey.\n\
          pub const DECOR_AT: (i32, i32) = {decor_at};\n\
          pub const DESKS_PER_STOREY: usize = {DESKS_PER_STOREY};\n\
+         /// A storey's spaces, each of `DESKS_PER_SPACE` desks, and where each\n\
+         /// starts, relative to the storey.\n\
+         pub const DESKS_PER_SPACE: usize = {DESKS_PER_SPACE};\n\
+         pub const SPACES_PER_STOREY: usize = {SPACES_PER_STOREY};\n\
+         pub const SPACE_X: [i32; {SPACES_PER_STOREY}] = [{space_x}];\n\
          /// Where desks start in a storey, and how far apart they are.\n\
          pub const DESKS_X: i32 = {desks_x};\n\
          pub const DESK_SPACING: i32 = {desk_spacing};\n\
@@ -395,9 +422,11 @@ fn main() {
          \x20   unsafe {{ oxivgl::fonts::Font::from_extern(core::ptr::addr_of!(label_outline_font) as *const ()) }};\n\
          pub const FONT_W: i32 = {FONT_W};\n\
          pub const FONT_H: i32 = {FONT_H};\n\
-         /// Where a workspace label's last character cell ends at the right, and\n\
-         /// where its cells' tops are, relative to the storey; and its colours.\n\
-         pub const LABEL_END: (i32, i32) = {label_end};\n\
+         /// Where each space's workspace label's last character cell ends at the\n\
+         /// right, and where labels' cells' tops are, relative to the storey; and\n\
+         /// their colours.\n\
+         pub const LABEL_ENDS: [i32; {SPACES_PER_STOREY}] = [{label_ends}];\n\
+         pub const LABEL_Y: i32 = {label_y};\n\
          pub const LABEL_COLOUR: u32 = {label_colour};\n\
          pub const LABEL_OUTLINE: u32 = {label_outline};\n\
          /// Each cloud's left edge and top with no drift, and its width.\n\
@@ -426,7 +455,9 @@ fn main() {
         decor_at = at(DECOR_AT),
         plumbob_above = PLUMBOB_ABOVE * scale,
         number_at = number_at.join(", "),
-        label_end = at(LABEL_END),
+        label_ends = LABEL_ENDS.map(|x| (x * scale).to_string()).join(", "),
+        label_y = LABEL_Y * scale,
+        space_x = SPACE_X.map(|x| (x * scale).to_string()).join(", "),
         n_clouds = CLOUDS.len(),
         clouds_at = CLOUDS
             .iter()

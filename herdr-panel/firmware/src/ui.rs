@@ -1,9 +1,10 @@
-//! A tower seen from the side, storeys of desks stacked on a lobby: each
-//! workspace takes a storey, or several in a row if its agents do not fit
-//! one. Each agent is a mascot behind its desk, looping the animation for its
+//! A tower seen from the side, storeys of desks stacked on a lobby, each
+//! storey two spaces of four desks: each workspace takes a space, or several
+//! in a row if its agents do not fit one, filling storeys from the left.
+//! Each agent is a mascot behind its desk, looping the animation for its
 //! state: running when it works, dozing with "z"s when idle, waving with "!"
-//! when blocked, hopping when done, "?" when unknown. A storey's lights are
-//! off when all its agents doze. The elevator rides to the focused agent's
+//! when blocked, hopping when done, "?" when unknown. A space's lights are
+//! off, and it is dim, when all its agents doze. The elevator rides to the focused agent's
 //! storey and a plumbob floats over that agent. Tapping an agent asks the
 //! bridge to focus it.
 //!
@@ -17,7 +18,7 @@
 
 use alloc::{string::String, vec::Vec};
 use embassy_time::Instant;
-use herdr_panel_protocol::{Id, State, Status, TimeOfDay, ToHost, cloud_x, storeys};
+use herdr_panel_protocol::{Id, State, Status, TimeOfDay, ToHost, cloud_x, spaces};
 use oxivgl::{
     anim::{ANIM_REPEAT_INFINITE, Anim, anim_path_ease_in_out, anim_set_y},
     enums::{EventCode, ObjFlag, ScrollbarMode},
@@ -30,12 +31,12 @@ use oxivgl::{
 
 use crate::{
     frames::{
-        ARROW_SIZE, ARROW_X, CAR_AT, CLOUDS, DECOR_AT, DECORS, DESK_SPACING, DESKS_PER_STOREY,
-        DESKS_X, DIGIT_W, FONT_H, FONT_W, GROUND_Y, LABEL_COLOUR, LABEL_END, LABEL_FONT,
-        LABEL_OUTLINE, LABEL_OUTLINE_FONT, Loop, NUMBER_AT, PLUMBOB_ABOVE, PLUMBOB_W, ROOF_H,
-        SLOTS, STOREY_H, arrow_down_image, arrow_up_image, awake, backdrop_image, car_image,
-        cloud_image, decor_image, digit_image, lobby_image, loops, plumbob, roof, storey_image,
-        street_image,
+        ARROW_SIZE, ARROW_X, CAR_AT, CLOUDS, DECOR_AT, DECORS, DESK_SPACING, DESKS_PER_SPACE,
+        DESKS_PER_STOREY, DESKS_X, DIGIT_W, FONT_H, FONT_W, GROUND_Y, LABEL_COLOUR, LABEL_ENDS,
+        LABEL_FONT, LABEL_OUTLINE, LABEL_OUTLINE_FONT, LABEL_Y, Loop, NUMBER_AT, PLUMBOB_ABOVE,
+        PLUMBOB_W, ROOF_H, SLOTS, SPACE_X, SPACES_PER_STOREY, STOREY_H, arrow_down_image,
+        arrow_up_image, awake, backdrop_image, car_image, cloud_image, decor_image, digit_image,
+        lobby_image, loops, plumbob, roof, space_image, street_image,
     },
     link,
     touch::POINTER,
@@ -77,8 +78,9 @@ struct Rendered {
     images: Vec<Image<'static>>,
     sprites: Vec<AnimImg<'static>>,
     labels: Vec<Label<'static>>,
-    /// The agents on each storey above the lobby, by desk.
-    storeys: Vec<Vec<Id>>,
+    /// The agents on each storey above the lobby, by desk; `None` at a
+    /// free desk.
+    storeys: Vec<Vec<Option<Id>>>,
 }
 
 pub struct Panel {
@@ -185,11 +187,12 @@ impl Panel {
         };
         self.rendered = Rendered::default();
         let mut r = Rendered::default();
-        let storeys: Vec<_> = storeys(&self.state.agents, DESKS_PER_STOREY).collect();
+        let spaces: Vec<_> = spaces(&self.state.agents, DESKS_PER_SPACE).collect();
+        let storeys = spaces.len().div_ceil(SPACES_PER_STOREY);
 
         // Shift everything so the top of the sky above the roof is at 0, and
         // keep the view where it was relative to the street.
-        let roof_top = storey_top(storeys.len()) - ROOF_H + 2;
+        let roof_top = storey_top(storeys) - ROOF_H + 2;
         let offset = (TOP_MARGIN - roof_top).max(0);
         let from_bottom = self.offset - scroller.get_scroll_y();
         let shift = offset - self.offset;
@@ -201,39 +204,50 @@ impl Panel {
         r.images
             .push(self.image(scroller, lobby_image(), 0, at(storey_top(0)))?);
         let mut focused = 0;
-        for (k, storey) in storeys.iter().enumerate() {
+        for (k, pair) in spaces.chunks(SPACES_PER_STOREY).enumerate() {
             let level = k + 1;
             let top = at(storey_top(level));
-            let lit = storey.lit();
+            let mut desks = alloc::vec![None; DESKS_PER_STOREY];
+            let mut right_lit = false;
+            for side in 0..SPACES_PER_STOREY {
+                // An empty right space has the left one's wallpaper, and is dark.
+                let space = pair.get(side);
+                let paper = space.map_or(pair[0].workspace, |s| s.workspace);
+                let lit = space.is_some_and(|s| s.lit());
+                right_lit = lit;
+                r.images.push(self.image(
+                    scroller,
+                    space_image(paper, lit, self.time, side),
+                    SPACE_X[side],
+                    top,
+                )?);
+                let Some(space) = space else { continue };
+                self.label(&mut r, space.label(), side, top)?;
+                for (i, a) in space.agents.iter().enumerate() {
+                    desks[side * DESKS_PER_SPACE + i] = Some(a.id.clone());
+                    if a.focused {
+                        focused = level;
+                    }
+                }
+            }
             r.images.push(self.image(
                 scroller,
-                storey_image(storey.workspace, lit, self.time),
-                0,
-                top,
-            )?);
-            // By day, decor in a storey with its lights off is not moonlit.
-            r.images.push(self.image(
-                scroller,
-                decor_image(level % DECORS, lit || self.time != TimeOfDay::Night),
+                decor_image(level % DECORS, right_lit, self.time),
                 DECOR_AT.0,
                 top + DECOR_AT.1,
             )?);
-            self.label(&mut r, storey.label(), top)?;
-            r.storeys
-                .push(storey.agents.iter().map(|a| a.id.clone()).collect());
-            if storey.agents.iter().any(|a| a.focused) {
-                focused = level;
-            }
+            r.storeys.push(desks);
         }
-        for level in 0..=storeys.len() {
+        for level in 0..=storeys {
             self.number(&mut r, level, at(storey_top(level)))?;
         }
         if let Some(l) = &self.roof {
             r.sprites.push(self.looping(scroller, l, 0, at(roof_top))?);
         }
-        for (k, storey) in storeys.iter().enumerate() {
-            let top = at(storey_top(k + 1));
-            for (agent, slot) in storey.agents.iter().zip(&SLOTS) {
+        for (k, space) in spaces.iter().enumerate() {
+            let top = at(storey_top(k / SPACES_PER_STOREY + 1));
+            let first = k % SPACES_PER_STOREY * DESKS_PER_SPACE;
+            for (agent, slot) in space.agents.iter().zip(&SLOTS[first..]) {
                 // An idle agent with the focus is awake rather than dozing.
                 let look = if agent.focused && agent.status == Status::Idle {
                     self.awake.as_ref()
@@ -367,10 +381,16 @@ impl Panel {
         Ok(())
     }
 
-    /// Puts a workspace's label `text`, outlined, at the top right of its
-    /// storey, the storey's top being `top`. Characters outside ASCII show as
-    /// '?'.
-    fn label(&self, r: &mut Rendered, text: &str, top: i32) -> Result<(), WidgetError> {
+    /// Puts a workspace's label `text`, outlined, at the top right of space
+    /// `side` of the storey whose top is `top`. Characters outside ASCII show
+    /// as '?'.
+    fn label(
+        &self,
+        r: &mut Rendered,
+        text: &str,
+        side: usize,
+        top: i32,
+    ) -> Result<(), WidgetError> {
         let Some(scroller) = &self.scroller else {
             return Ok(());
         };
@@ -381,7 +401,7 @@ impl Panel {
             .chars()
             .map(|c| if (' '..='~').contains(&c) { c } else { '?' })
             .collect();
-        let (x, y) = (LABEL_END.0 - FONT_W * text.len() as i32, top + LABEL_END.1);
+        let (x, y) = (LABEL_ENDS[side] - FONT_W * text.len() as i32, top + LABEL_Y);
         let outline = Label::new(scroller)?;
         outline.add_style(&self.outline_style, Selector::DEFAULT);
         outline.text(&text);
@@ -450,8 +470,8 @@ impl Panel {
         self.rendered
             .storeys
             .get(level.checked_sub(1)?)?
-            .get(desk)
-            .cloned()
+            .get(desk)?
+            .clone()
     }
 }
 

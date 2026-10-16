@@ -206,23 +206,24 @@ pub fn workspace(id: &str) -> &str {
     id.split(':').next().unwrap_or_default()
 }
 
-/// One storey of the panel's tower: agents of one workspace, in order.
+/// One space of the panel's tower, a few desks of a storey: agents of one
+/// workspace, in order.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub struct Storey<'a> {
+pub struct Space<'a> {
     /// Which workspace this is, counting from 0 in the order they appear;
-    /// storeys of the same workspace share it.
+    /// spaces of the same workspace share it.
     pub workspace: usize,
     pub agents: &'a [Agent],
 }
 
-impl<'a> Storey<'a> {
+impl<'a> Space<'a> {
     /// The workspace's label.
     pub fn label(&self) -> &'a str {
         self.agents.first().map_or("", |a| a.workspace.as_str())
     }
 
-    /// Whether the storey's lights are on: someone there is not idle, or
-    /// has the focus.
+    /// Whether the space's lights are on: someone there is not idle, or has
+    /// the focus.
     pub fn lit(&self) -> bool {
         self.agents
             .iter()
@@ -230,12 +231,12 @@ impl<'a> Storey<'a> {
     }
 }
 
-/// Splits `agents` into storeys of at most `per_storey` agents (at least 1),
-/// one workspace per storey: a workspace with more agents takes several
-/// storeys in a row. Agents of a workspace must be next to each other, as the
+/// Splits `agents` into spaces of at most `per_space` agents (at least 1),
+/// one workspace per space: a workspace with more agents takes several
+/// spaces in a row. Agents of a workspace must be next to each other, as the
 /// bridge sends them.
-pub fn storeys(agents: &[Agent], per_storey: usize) -> impl Iterator<Item = Storey<'_>> {
-    let per_storey = per_storey.max(1);
+pub fn spaces(agents: &[Agent], per_space: usize) -> impl Iterator<Item = Space<'_>> {
+    let per_space = per_space.max(1);
     let mut rest = agents;
     let mut index = 0;
     let mut previous: Option<&str> = None;
@@ -250,12 +251,12 @@ pub fn storeys(agents: &[Agent], per_storey: usize) -> impl Iterator<Item = Stor
             .iter()
             .take_while(|a| workspace(&a.id) == ws)
             .count()
-            .min(per_storey);
-        let (storey, tail) = rest.split_at(run);
+            .min(per_space);
+        let (space, tail) = rest.split_at(run);
         rest = tail;
-        Some(Storey {
+        Some(Space {
             workspace: index,
-            agents: storey,
+            agents: space,
         })
     })
 }
@@ -452,19 +453,19 @@ mod tests {
     }
 
     fn shape(agents: &[Agent], per: usize) -> std::vec::Vec<(usize, usize)> {
-        storeys(agents, per)
+        spaces(agents, per)
             .map(|s| (s.workspace, s.agents.len()))
             .collect()
     }
 
     #[test]
-    fn each_workspace_gets_a_storey() {
+    fn each_workspace_gets_a_space() {
         let a = agents(&["w1:p1", "w1:p2", "w2:p1", "w3:p4"]);
         assert_eq!(shape(&a, 6), [(0, 2), (1, 1), (2, 1)]);
     }
 
     #[test]
-    fn a_big_workspace_takes_several_storeys() {
+    fn a_big_workspace_takes_several_spaces() {
         let ids: std::vec::Vec<std::string::String> =
             (0..14).map(|i| std::format!("w1:p{i}")).collect();
         let mut a = agents(&ids.iter().map(|s| s.as_str()).collect::<std::vec::Vec<_>>());
@@ -473,31 +474,31 @@ mod tests {
     }
 
     #[test]
-    fn a_full_storey_does_not_spill_into_the_next_workspace() {
+    fn a_full_space_does_not_spill_into_the_next_workspace() {
         let a = agents(&["w1:p1", "w1:p2", "w2:p1"]);
         assert_eq!(shape(&a, 2), [(0, 2), (1, 1)]);
     }
 
     #[test]
-    fn storeys_keep_every_agent_in_order() {
+    fn spaces_keep_every_agent_in_order() {
         let a = agents(&["w1:p1", "w1:p2", "w1:p3", "w2:p1", "w2:p2"]);
-        let flat: std::vec::Vec<&str> = storeys(&a, 2)
+        let flat: std::vec::Vec<&str> = spaces(&a, 2)
             .flat_map(|s| s.agents.iter().map(|a| a.id.as_str()))
             .collect();
         assert_eq!(flat, ["w1:p1", "w1:p2", "w1:p3", "w2:p1", "w2:p2"]);
     }
 
     #[test]
-    fn a_storey_has_its_workspace_label() {
+    fn a_space_has_its_workspace_label() {
         let a = agents(&["w1:p1", "w1:p2", "w2:p1"]);
-        let labels: std::vec::Vec<&str> = storeys(&a, 1).map(|s| s.label()).collect();
+        let labels: std::vec::Vec<&str> = spaces(&a, 1).map(|s| s.label()).collect();
         assert_eq!(labels, ["w1", "w1", "w2"]);
     }
 
     #[test]
-    fn a_storey_is_lit_unless_everyone_idles_unfocused() {
+    fn a_space_is_lit_unless_everyone_idles_unfocused() {
         let mut a = agents(&["w1:p1", "w1:p2"]);
-        let lit = |a: &[Agent]| storeys(a, 6).next().unwrap().lit();
+        let lit = |a: &[Agent]| spaces(a, 6).next().unwrap().lit();
         assert!(!lit(&a));
         a[1].focused = true;
         assert!(lit(&a));
@@ -507,8 +508,8 @@ mod tests {
     }
 
     #[test]
-    fn no_agents_no_storeys() {
-        assert_eq!(storeys(&[], 6).count(), 0);
+    fn no_agents_no_spaces() {
+        assert_eq!(spaces(&[], 6).count(), 0);
     }
 
     #[test]
