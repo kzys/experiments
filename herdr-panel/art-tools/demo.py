@@ -2,9 +2,10 @@
 agents in every state, a dark storey, the lobby, roof and street. It is
 where the tower's look is designed; export.py turns its drawings into the
 art in ../assets. Writes demo.png, demo-2x.png, demo-3x.png and, with the
-touch areas outlined, demo-touch.png and demo-touch-3x.png into OUT_DIR.
+touch areas outlined, demo-touch.png and demo-touch-3x.png into OUT_DIR,
+at TIME of day: dawn, day, sunset or night (the default).
 
-Usage: python demo.py OUT_DIR (needs pypng)
+Usage: python demo.py OUT_DIR [TIME] (needs pypng)
 """
 
 import math
@@ -61,6 +62,14 @@ class Img:
                 if d <= 1:
                     self.blend(x, y, c, a * (3 - math.floor(d * 3)) / 3)
 
+    def paste(self, other, x, y):
+        """Draws `other` with its top left at (`x`, `y`), skipping its
+        transparent pixels."""
+        for yy in range(other.h):
+            for xx in range(other.w):
+                if other.px[yy][xx][3]:
+                    self.set(x + xx, y + yy, other.px[yy][xx])
+
     def grid(self, x, y, rows, palette):
         """Draws a text grid: each character is a pixel, looked up in
         `palette`; '.' and ' ' are transparent."""
@@ -112,7 +121,43 @@ LAMP = h(0xFFF0A0)
 WARM = h(0xFFD890)
 MOON = h(0xF8F0D0)
 MOONLIGHT = h(0x5868B0)
-SKY = [h(0x100828), h(0x201848), h(0x382868), h(0x583880), h(0x904878), h(0xD07058)]
+# The sky at each time of day, from the top of the screen down to the
+# ground: its colours, how many stars show (0 to 1), and what hangs in it.
+TIMES = {
+    "dawn": {
+        "sky": [0x283870, 0x485898, 0x8070B0, 0xC888B0, 0xF0A8A0, 0xF8D0A0],
+        "stars": 0.3,
+        "body": "sun",
+        "clouds": ramp(0xF8D8D0, 0xE0A8B8, 0xA07898),
+    },
+    "day": {
+        "sky": [0x3070D0, 0x4088E0, 0x58A0E8, 0x78B8F0, 0x98D0F8, 0xC0E0F8],
+        "stars": 0,
+        "body": "sun",
+        "clouds": ramp(0xFFFFFF, 0xE8F0F8, 0xA8C0D8),
+    },
+    "sunset": {
+        "sky": [0x282058, 0x503878, 0x904888, 0xD86070, 0xF08850, 0xF8B858],
+        "stars": 0.1,
+        "body": "sun",
+        "clouds": ramp(0xF8B890, 0xD87878, 0x804868),
+    },
+    "night": {
+        "sky": [0x100828, 0x201848, 0x382868, 0x583880, 0x904878, 0xD07058],
+        "stars": 1,
+        "body": "moon",
+        "clouds": None,
+    },
+}
+TIME = "night"
+SKY = [h(c) for c in TIMES[TIME]["sky"]]
+
+
+def set_time(name):
+    """Makes everything drawn from now on show time of day `name`."""
+    global TIME, SKY
+    TIME = name
+    SKY = [h(c) for c in TIMES[name]["sky"]]
 WALLPAPER = [
     ramp(0xF8E8C8, 0xF0D0A8, 0xC8A880),
     ramp(0xD0F0E0, 0xB0D8C8, 0x88B0A0),
@@ -187,21 +232,25 @@ def sky(y):
     return mix(SKY[i], SKY[i + 1], t - i)
 
 
-def backdrop(img):
-    for y in range(H):
-        img.fill(0, y, W, 1, sky(y))
+def stars(img, amount):
+    """Stars in the upper sky; `amount` (0 to 1) of them show, the faint
+    ones first to go."""
     for y in range(0, 200):
         for x in range(W):
             r = hsh(x, y) % 300
-            if r == 0:
-                img.set(x, y, h(0xF8F8F8))
-            elif r < 3:
-                img.blend(x, y, h(0xC0C8F8), 0.6)
+            if r == 0 and amount >= 0.1:
+                img.blend(x, y, h(0xF8F8F8), min(1, amount * 1.5))
+            elif r < 3 and hsh(y, x) % 10 < amount * 10:
+                img.blend(x, y, h(0xC0C8F8), 0.6 * amount)
+    if amount < 0.5:
+        return
     for sx, sy in [(30, 40), (150, 22), (110, 120), (230, 150)]:
         img.set(sx, sy, h(0xFFFFFF))
         for dx, dy in [(1, 0), (-1, 0), (0, 1), (0, -1)]:
             img.blend(sx + dx, sy + dy, h(0xC0C8F8), 0.7)
-    cx, cy = 268, 62
+
+
+def moon(img, cx, cy):
     img.glow(cx, cy, 22, MOON, 0.16)
     for y in range(-9, 10):
         for x in range(-9, 10):
@@ -212,6 +261,108 @@ def backdrop(img):
                     img.set(cx + x, cy + y, MOON)
     for x, y in [(cx + 3, cy - 4), (cx + 6, cy + 1), (cx + 2, cy + 5)]:
         img.set(x, y, h(0xD8D0B0))
+
+
+def sun(img, cx, cy, r, core, rim, halo):
+    """A sun of radius `r`: `core` in the middle, `rim` at the edge, and a
+    halo of `halo` around it."""
+    img.glow(cx, cy, r * 3, halo, 0.22)
+    for y in range(-r, r + 1):
+        for x in range(-r, r + 1):
+            d = x * x + y * y
+            if d <= r * r:
+                img.set(cx + x, cy + y, rim if d > (r - 2) ** 2 else core)
+
+
+CLOUD_H = 13
+# Each cloud's place with no drift: its left edge and base, and its width.
+CLOUDS = [(14, 92, 46), (176, 70, 38), (110, 186, 54), (228, 214, 40)]
+
+
+def cloud(w, seed, c):
+    """A flat-bottomed pixel cloud `w` wide and CLOUD_H tall, shaped by
+    `seed`: puffs of `c["light"]` on a `c["base"]` body, shaded with
+    `c["dark"]` below."""
+    img = Img(w, CLOUD_H)
+    y = CLOUD_H - 1
+    puffs = [(w * k // 4, y - 3 - (hsh(seed, k) % 4), 4 + hsh(k, seed) % 4) for k in range(1, 4)]
+    for yy in range(CLOUD_H):
+        for xx in range(w):
+            inside = yy >= y - 3 or any((xx - px) ** 2 + (yy - py) ** 2 <= r * r for px, py, r in puffs)
+            if not inside:
+                continue
+            top = not any((xx - px) ** 2 + (yy - 1 - py) ** 2 <= r * r for px, py, r in puffs) and yy < y - 3
+            img.set(xx, yy, c["dark"] if yy >= y - 1 else c["light"] if top else c["base"])
+    return img
+
+
+# How far clouds drift, in pixels per hour: so slowly that one takes about
+# two weeks to cross the screen. The drift at a moment is the hours since
+# the Unix epoch, so it needs no state of its own.
+CLOUD_PX_PER_HOUR = 1
+
+
+def cloud_drift(unix_seconds):
+    """The clouds' drift, in pixels, at `unix_seconds`."""
+    return unix_seconds * CLOUD_PX_PER_HOUR // 3600
+
+
+def cloud_at(k, drift):
+    """Where cloud `k`'s top left goes after drifting `drift` pixels to the
+    right: off the right edge, it comes back in at the left."""
+    x, base, w = CLOUDS[k]
+    return (x + drift + w) % (W + w) - w, base - CLOUD_H + 1
+
+
+def clouds(img, drift=0):
+    """The time of day's clouds, if it has any, drifted `drift` pixels."""
+    c = TIMES[TIME]["clouds"]
+    if not c:
+        return
+    for k, (x, _, w) in enumerate(CLOUDS):
+        img.paste(cloud(w, x, c), *cloud_at(k, drift))
+
+
+# A 4x4 ordered-dither threshold map.
+BAYER = [[0, 8, 2, 10], [12, 4, 14, 6], [3, 11, 1, 9], [15, 7, 13, 5]]
+
+
+def sky_dithered(x, y):
+    """The sky's colour at (`x`, `y`), a smooth gradient that each channel
+    rounds up or down to one of its 15-bit levels by a 4x4 ordered dither,
+    so the levels blend instead of banding."""
+    t = min(max(y / GROUND, 0), 1) ** 1.3 * (len(SKY) - 1)
+    i = min(int(t), len(SKY) - 2)
+    a, b, f = SKY[i], SKY[i + 1], t - i
+    threshold = (BAYER[y % 4][x % 4] + 0.5) / 16
+    out = []
+    for k in range(3):
+        v = (a[k] + (b[k] - a[k]) * f) / 8
+        lo = int(v)
+        out.append(min(248, 8 * (lo + (1 if v - lo > threshold else 0))))
+    return tuple(out) + (255,)
+
+
+def backdrop(img, dither=True):
+    """The sky, its stars and its sun or moon; the sky's gradient dithered
+    if `dither`, else in flat bands."""
+    t = TIMES[TIME]
+    for y in range(H):
+        if dither:
+            for x in range(W):
+                img.set(x, y, sky_dithered(x, y))
+        else:
+            img.fill(0, y, W, 1, sky(y))
+    if t["stars"]:
+        stars(img, t["stars"])
+    if TIME == "dawn":
+        sun(img, 64, 150, 9, h(0xFFF8E0), h(0xF8D898), h(0xF8C8A0))
+    elif TIME == "day":
+        sun(img, 250, 52, 8, h(0xFFFFF0), h(0xF8F0B0), h(0xFFF8D0))
+    elif TIME == "sunset":
+        sun(img, 250, 140, 12, h(0xF8D070), h(0xF89848), h(0xF89060))
+    else:
+        moon(img, 268, 62)
 
 
 def bricks(img, x, y, w, hh):
@@ -362,13 +513,14 @@ BOOKS = [h(0xC83838), h(0x3870C8), h(0xE8B838), h(0x48A048), h(0x8858C0), h(0xE0
 
 
 def bookshelf(img, x, floor):
-    w, hh = 22, 27
+    w, hh, depth = 22, 24, 2
     t = floor - hh
+    oblique(img, x, t, w, hh, depth, WOOD)
     img.box(x, t, w, hh, h(0x583018), INK)
     img.fill(x + 1, t + 1, 2, hh - 2, WOOD["dark"])
     img.fill(x + w - 3, t + 1, 2, hh - 2, WOOD["dark"])
     img.fill(x + 1, t + 1, w - 2, 1, WOOD["light"])
-    shelves = [t + 9, t + 17, floor - 2]
+    shelves = [t + 8, t + 15, floor - 2]
     for sy in shelves:
         img.fill(x + 1, sy, w - 2, 1, WOOD["light"])
         img.fill(x + 1, sy + 1, w - 2, 1, WOOD["base"])
@@ -377,7 +529,7 @@ def bookshelf(img, x, floor):
         end = x + w - 3 - (4 if n == 1 else 0)
         while bx < end - 1:
             bw = 2 + hsh(bx, n) % 2
-            bh = 5 + hsh(n, bx) % 3
+            bh = 5 + hsh(n, bx) % 2
             if bx + bw > end:
                 break
             c = BOOKS[hsh(bx * 3, sy) % len(BOOKS)]
@@ -392,30 +544,32 @@ def bookshelf(img, x, floor):
             for k in range(6):
                 img.fill(end - 1 + k // 2, sy - 1 - k, 2, 1, BOOKS[1])
             img.fill(end + 2, sy - 4, 1, 4, METAL["base"])
-    # On top: a small plant and a vase.
-    blob(img, x + 6, t - 4, 3, LEAF)
-    img.box(x + 4, t - 2, 5, 3, POT["base"], INK)
-    img.box(x + 14, t - 6, 4, 7, h(0x5878C8), INK)
-    img.set(x + 15, t - 5, h(0xA0B8F0))
-    img.set(x + 15, t - 8, h(0xF87068))
-    img.set(x + 16, t - 9, h(0xF8D048))
+    # On top, standing on the middle of its depth: a small plant and a vase.
+    ox, oy = x - 1, t - 1
+    blob(img, ox + 6, oy - 4, 3, LEAF)
+    img.box(ox + 4, oy - 2, 5, 3, POT["base"], INK)
+    img.box(ox + 14, oy - 6, 4, 7, h(0x5878C8), INK)
+    img.set(ox + 15, oy - 5, h(0xA0B8F0))
+    img.set(ox + 15, oy - 8, h(0xF87068))
+    img.set(ox + 16, oy - 9, h(0xF8D048))
 
 
 def water_cooler(img, x, floor):
     # Cabinet with hot and cold taps and a drip tray.
-    cx0, cw, ch = x + 5, 12, 15
+    cx0, cw, ch, depth = x + 5, 12, 15, 2
     ct = floor - ch
-    img.box(cx0, ct, cw, ch, METAL["light"], INK)
+    oblique(img, cx0, ct, cw, ch, depth, {"light": h(0xFFFFFF), "base": METAL["light"], "dark": METAL["base"]})
     img.fill(cx0 + cw - 2, ct + 1, 1, ch - 2, METAL["base"])
     img.fill(cx0 + 1, ct + 6, cw - 2, 1, METAL["base"])
     img.set(cx0 + 3, ct + 3, h(0xF84838))
     img.set(cx0 + 8, ct + 3, h(0x3870C8))
     img.fill(cx0 + 2, ct + 5, cw - 4, 1, h(0x383040))
     img.fill(cx0 + 2, floor - 3, cw - 4, 1, METAL["base"])
-    # The bottle, upside down: neck into the cabinet, water nearly full.
-    bx, bw, bh = cx0 + 1, 10, 12
-    bt = ct - bh
-    img.fill(bx + 3, ct - 1, 4, 2, h(0x3870C8))
+    # The bottle, upside down, on the middle of the cabinet's top: neck
+    # into it, water nearly full.
+    bx, bw, bh = cx0, 10, 12
+    bt = ct - 1 - bh
+    img.fill(bx + 3, ct - 2, 4, 2, h(0x3870C8))
     img.box(bx, bt, bw, bh, h(0x70B0E8), INK)
     img.fill(bx + 1, bt + 1, bw - 2, 2, h(0xC0E0F8))
     img.fill(bx + 1, bt + 3, bw - 2, 1, h(0x4890D0))
@@ -430,13 +584,14 @@ def water_cooler(img, x, floor):
 
 def coffee_machine(img, x, floor):
     # Cabinet with two doors.
-    img.box(x + 1, floor - 12, 20, 12, WOOD["base"], INK)
-    img.fill(x + 2, floor - 11, 18, 1, WOOD["light"])
-    img.fill(x + 11, floor - 10, 1, 9, INK)
-    img.set(x + 9, floor - 6, METAL["light"])
-    img.set(x + 13, floor - 6, METAL["light"])
-    # The machine: dark body, display, buttons, a carafe of coffee.
-    mx, mt = x + 4, floor - 25
+    oblique(img, x + 2, floor - 12, 20, 12, 2, WOOD)
+    img.fill(x + 3, floor - 11, 18, 1, WOOD["light"])
+    img.fill(x + 12, floor - 10, 1, 9, INK)
+    img.set(x + 10, floor - 6, METAL["light"])
+    img.set(x + 14, floor - 6, METAL["light"])
+    # The machine, on the middle of the cabinet's top: dark body, display,
+    # buttons, a carafe of coffee.
+    mx, mt = x + 4, floor - 26
     img.box(mx, mt, 14, 13, h(0x383040), INK)
     img.fill(mx + 1, mt + 1, 12, 1, h(0x585068))
     img.fill(mx + 2, mt + 3, 4, 2, h(0x204828))
@@ -542,6 +697,26 @@ def sign(img, x, y, rows, c):
         img.set(px, py, c)
 
 
+def oblique(img, x, y, w, hh, depth, r):
+    """A solid box in oblique projection, as the desks are drawn: its front
+    face `w` x `hh` at (`x`, `y`) in `r["base"]`, its top a strip `depth` rows
+    deep in `r["light"]` and its left side in `r["dark"]`, both receding to the
+    upper left, one pixel left per row: the side's bottom edge rises as it
+    goes back, as its top does."""
+    bottom = y + hh
+    for k in range(depth):
+        x0 = x - k
+        img.fill(x0 + 1, y - 1 - k, w - 1, 1, r["light"])
+        img.set(x0, y - 1 - k, INK)
+        img.set(x0 + w, y - 1 - k, INK)
+    img.fill(x - depth, y - depth - 1, w + 1, 1, INK)
+    for k in range(1, depth + 1):
+        img.fill(x - k, y - k + 1, 1, bottom - y - 2, r["dark"])
+        img.set(x - k, bottom - 1 - k, INK)
+    img.fill(x - depth, y - depth, 1, bottom - y, INK)
+    img.box(x, y, w, hh, r["base"], INK)
+
+
 def desk(img, cx, top, lit, i, occupied):
     """A workstation in front of the agent's right half: a solid desk in
     oblique projection, receding to the upper left, so its top shows as a
@@ -556,19 +731,7 @@ def desk(img, cx, top, lit, i, occupied):
     # Back on the desk: one pixel left per row of the top's depth.
     mx = cx + 3 - depth
     base = front - depth
-    # Top surface: each row further back sits one pixel further left.
-    for k in range(depth):
-        y = front - 1 - k
-        x0 = dx0 - k
-        img.fill(x0 + 1, y, dw - 1, 1, WOOD["light"])
-        img.set(x0, y, INK)
-        img.set(x0 + dw, y, INK)
-    img.fill(dx0 - depth, front - depth - 1, dw + 1, 1, INK)
-    # Left side face, then the front panel down to the floor.
-    for k in range(1, depth + 1):
-        img.fill(dx0 - k, front - k + 1, 1, floor - front + k - 1, WOOD["dark"])
-    img.fill(dx0 - depth, front - depth, 1, floor - front + depth, INK)
-    img.box(dx0, front, dw, floor - front, WOOD["base"], INK)
+    oblique(img, dx0, front, dw, floor - front, depth, WOOD)
     img.fill(dx0 + 1, front, dw - 2, 1, WOOD["dark"])
     img.fill(dx0 + 5, front + 2, 8, 1, WOOD["dark"])
     # Monitor on a short stand standing on the back row of the top.
@@ -633,6 +796,9 @@ def storey(img, level, paper, agents, focus=None):
         desk(img, desk_centre(i), top, lit, i + level, i < len(agents))
     if lit:
         lamps(img, top, True)
+    elif TIME != "night":
+        # By day a room with the lights off is just that.
+        lamps(img, top, False)
     else:
         for y in range(top, top + INNER + 1):
             for x in range(ROOMS_X, ROOMS_END):
@@ -668,12 +834,13 @@ def lobby(img, number=True):
     # Reception: a counter with panels, a bell, a screen and a vase.
     rx, rw, rh = 60, 44, 13
     rt = floor - rh
-    img.box(rx - 1, rt - 1, rw + 2, 3, WOOD["light"], INK)
-    img.box(rx, rt + 1, rw, rh - 1, WOOD["base"], INK)
+    oblique(img, rx, rt, rw, rh, 3, WOOD)
     for k in range(3):
-        img.box(rx + 3 + k * 14, rt + 4, 11, rh - 7, WOOD["base"], WOOD["dark"])
-        img.fill(rx + 4 + k * 14, rt + 5, 9, 1, WOOD["light"])
+        img.box(rx + 3 + k * 14, rt + 3, 11, rh - 6, WOOD["base"], WOOD["dark"])
+        img.fill(rx + 4 + k * 14, rt + 4, 9, 1, WOOD["light"])
     img.fill(rx + 1, floor - 2, rw - 2, 1, WOOD["dark"])
+    # On the counter's top, a row back: a screen, a bell and a vase.
+    rx, rt = rx - 1, rt - 1
     img.box(rx + 6, rt - 9, 9, 8, METAL["base"], INK)
     img.fill(rx + 7, rt - 8, 7, 1, METAL["light"])
     img.fill(rx + 9, rt - 1, 3, 1, INK)
@@ -691,10 +858,7 @@ def lobby(img, number=True):
     plant(img, 232, floor, 1.15)
     # A bench with slats on metal legs.
     bx0, bw = 140, 34
-    for k in range(2):
-        img.fill(bx0, floor - 9 + k * 2, bw, 1, INK)
-        img.fill(bx0 + 1, floor - 8 + k * 2, bw - 2, 1, WOOD["light"] if k == 0 else WOOD["base"])
-    img.fill(bx0, floor - 5, bw, 1, INK)
+    oblique(img, bx0, floor - 7, bw, 3, 2, WOOD)
     for lx in (bx0 + 3, bx0 + bw - 5):
         img.fill(lx, floor - 4, 2, 4, METAL["dark"])
         img.fill(lx, floor - 1, 2, 1, INK)
@@ -823,8 +987,10 @@ def touch_areas(img, storeys, arrows):
 
 def main():
     out = sys.argv[1] if len(sys.argv) > 1 else "."
+    set_time(sys.argv[2] if len(sys.argv) > 2 else "night")
     img = Img(W, H)
     backdrop(img)
+    clouds(img)
     street(img)
     lobby(img)
     storeys = [

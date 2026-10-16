@@ -1,5 +1,6 @@
 //! Links the ESP-HAL linker script and turns the art into LVGL images: the
-//! tower's backdrop, street, lobby, storeys, digits, roof and elevator, which
+//! tower's backdrop and clouds and storeys at each time of day, street,
+//! lobby, digits, roof and elevator, which
 //! the scene crate puts together from the PNGs in `assets/`, and each mascot
 //! frame (cut where its desk hides it). Each is written as
 //! a PNG at screen size, converted with LVGL's `LVGLImage.py` (needs Python
@@ -17,13 +18,13 @@ use std::{
     process::Command,
 };
 
-use herdr_panel_protocol::Status;
+use herdr_panel_protocol::{Status, TimeOfDay};
 use herdr_panel_scene::{
-    ARROW_SIZE, ARROW_X, CAR_AT, DECOR_AT, DECORS, DESK_SPACING, DESKS_PER_STOREY, DESKS_X,
+    ARROW_SIZE, ARROW_X, CAR_AT, CLOUDS, DECOR_AT, DECORS, DESK_SPACING, DESKS_PER_STOREY, DESKS_X,
     FONT_DESCENT, FONT_H, FONT_W, GROUND_Y, Image, LABEL_COLOUR, LABEL_END, LABEL_OUTLINE,
     PLUMBOB_ABOVE, ROOF_H, SCALE, STOREY_H, WALLPAPERS, animation, arrow, awake_animation,
-    backdrop, behind_desk, car, decor, digits, font, lobby, number_at, outline, plumbob, roof,
-    slot, storey, street,
+    backdrop, behind_desk, car, clouds, decor, digits, font, lobby, number_at, outline, plumbob,
+    roof, slot, storey, street,
 };
 use oxivgl_build::ImageConfig;
 
@@ -223,7 +224,21 @@ fn main() {
         );
         writeln!(declarations, "oxivgl::image_declare!({symbol});").unwrap();
     };
-    image("backdrop", &backdrop(), false);
+    let mut backdrops = String::new();
+    let mut cloud_arms = String::new();
+    for t in TimeOfDay::ALL {
+        let name = t.name();
+        image(&format!("backdrop_{name}"), &backdrop(t), false);
+        writeln!(backdrops, "        TimeOfDay::{t:?} => backdrop_{name}(),").unwrap();
+        for (k, img) in clouds(t).iter().enumerate() {
+            image(&format!("cloud_{name}_{k}"), img, true);
+            writeln!(
+                cloud_arms,
+                "        (TimeOfDay::{t:?}, {k}) => Some(cloud_{name}_{k}()),"
+            )
+            .unwrap();
+        }
+    }
     image("street", &street(), false);
     image("lobby", &lobby(), false);
     image("car", &car(), true);
@@ -232,9 +247,19 @@ fn main() {
     let mut storeys = String::new();
     for paper in 0..WALLPAPERS {
         for lit in [false, true] {
-            let symbol = format!("storey_{paper}_{}", if lit { "lit" } else { "dark" });
-            image(&symbol, &storey(paper, lit), false);
-            writeln!(storeys, "        ({paper}, {lit}) => {symbol}(),").unwrap();
+            for t in TimeOfDay::ALL {
+                let symbol = format!(
+                    "storey_{paper}_{}_{}",
+                    if lit { "lit" } else { "dark" },
+                    t.name()
+                );
+                image(&symbol, &storey(paper, lit, t), false);
+                writeln!(
+                    storeys,
+                    "        ({paper}, {lit}, TimeOfDay::{t:?}) => {symbol}(),"
+                )
+                .unwrap();
+            }
         }
     }
     let mut decors = String::new();
@@ -314,10 +339,16 @@ fn main() {
          pub fn plumbob() -> Loop {{\n    Loop {{ frames: Box::leak(Box::new([{pointers}])), duration_ms: 1200 }}\n}}\n\n\
          /// The roof, its antenna light blinking. Call once, like [`loops`].\n\
          pub fn roof() -> Loop {{\n    Loop {{ frames: Box::leak(Box::new([{roof_frames}])), duration_ms: 1600 }}\n}}\n\n\
-         {backdrop}{street}{lobby}{car}{arrow_up}{arrow_down}\
-         /// A storey in wallpaper `paper` (modulo [`WALLPAPERS`]), its lights on or off.\n\
-         pub fn storey_image(paper: usize, lit: bool) -> &'static oxivgl::widgets::lv_image_dsc_t {{\n\
-         \x20   match (paper % WALLPAPERS, lit) {{\n{storeys}        _ => unreachable!(),\n    }}\n}}\n\n\
+         /// The sky and the city at `time`, filling the screen; it stays still.\n\
+         pub fn backdrop_image(time: TimeOfDay) -> &'static oxivgl::widgets::lv_image_dsc_t {{\n\
+         \x20   match time {{\n{backdrops}    }}\n}}\n\n\
+         /// Cloud `k` of [`CLOUDS`] at `time`; none at night.\n\
+         pub fn cloud_image(time: TimeOfDay, k: usize) -> Option<&'static oxivgl::widgets::lv_image_dsc_t> {{\n\
+         \x20   match (time, k) {{\n{cloud_arms}        _ => None,\n    }}\n}}\n\n\
+         {street}{lobby}{car}{arrow_up}{arrow_down}\
+         /// A storey in wallpaper `paper` (modulo [`WALLPAPERS`]) at `time`, its lights on or off.\n\
+         pub fn storey_image(paper: usize, lit: bool, time: TimeOfDay) -> &'static oxivgl::widgets::lv_image_dsc_t {{\n\
+         \x20   match (paper % WALLPAPERS, lit, time) {{\n{storeys}        _ => unreachable!(),\n    }}\n}}\n\n\
          /// Decor `kind` (modulo [`DECORS`]) for a storey's right end, lit or not.\n\
          pub fn decor_image(kind: usize, lit: bool) -> &'static oxivgl::widgets::lv_image_dsc_t {{\n\
          \x20   match (kind % DECORS, lit) {{\n{decors}        _ => unreachable!(),\n    }}\n}}\n\n\
@@ -369,13 +400,11 @@ fn main() {
          pub const LABEL_END: (i32, i32) = {label_end};\n\
          pub const LABEL_COLOUR: u32 = {label_colour};\n\
          pub const LABEL_OUTLINE: u32 = {label_outline};\n\
+         /// Each cloud's left edge and top with no drift, and its width.\n\
+         pub const CLOUDS: [(i32, i32, i32); {n_clouds}] = [{clouds_at}];\n\
          /// Where the agents at each desk go, relative to the storey.\n\
          pub const SLOTS: [Slot; {DESKS_PER_STOREY}] = [\n{slots}];\n",
         n = ANIMATIONS.len(),
-        backdrop = image_fn(
-            "backdrop",
-            "The sky and the city, filling the screen; it stays still."
-        ),
         street = image_fn(
             "street",
             "The street, from `GROUND_Y` to the bottom of the screen."
@@ -398,6 +427,12 @@ fn main() {
         plumbob_above = PLUMBOB_ABOVE * scale,
         number_at = number_at.join(", "),
         label_end = at(LABEL_END),
+        n_clouds = CLOUDS.len(),
+        clouds_at = CLOUDS
+            .iter()
+            .map(|&(x, y, w)| format!("({}, {}, {})", x * scale, y * scale, w as i32 * scale))
+            .collect::<Vec<_>>()
+            .join(", "),
         label_colour = hex(LABEL_COLOUR),
         label_outline = hex(LABEL_OUTLINE),
     );

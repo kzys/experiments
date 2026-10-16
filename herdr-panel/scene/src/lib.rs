@@ -16,7 +16,7 @@
 //!
 //! The positions here must match the art: the tests check that they do.
 
-use herdr_panel_protocol::Status;
+use herdr_panel_protocol::{Status, TimeOfDay, cloud_x};
 use serde::Deserialize;
 
 /// Size of the screen in art pixels.
@@ -273,9 +273,49 @@ pub fn roof_top(storeys: usize) -> i32 {
     storey_top(storeys) - ROOF_H as i32 + 1
 }
 
-/// What stays still behind the tower: the night sky and the moon.
-pub fn backdrop() -> Image {
-    asset!("backdrop.png")
+/// What stays still behind the tower: the sky at `time`, with its stars and
+/// sun or moon, but not its [`clouds`].
+pub fn backdrop(time: TimeOfDay) -> Image {
+    match time {
+        TimeOfDay::Dawn => asset!("backdrop-dawn.png"),
+        TimeOfDay::Day => asset!("backdrop-day.png"),
+        TimeOfDay::Sunset => asset!("backdrop-sunset.png"),
+        TimeOfDay::Night => asset!("backdrop-night.png"),
+    }
+}
+
+/// The height of a cloud.
+pub const CLOUD_H: usize = 13;
+
+/// Each cloud's left edge and top with no drift, and its width.
+pub const CLOUDS: [(i32, i32, usize); 4] =
+    [(14, 80, 46), (176, 58, 38), (110, 174, 54), (228, 202, 40)];
+
+/// The clouds in the sky at `time`, in the order of [`CLOUDS`]; none at
+/// night. They go in front of the [`backdrop`], at [`cloud_at`].
+pub fn clouds(time: TimeOfDay) -> Vec<Image> {
+    let row = match time {
+        TimeOfDay::Dawn => 0,
+        TimeOfDay::Day => 1,
+        TimeOfDay::Sunset => 2,
+        TimeOfDay::Night => return Vec::new(),
+    };
+    let sheet = asset!("clouds.png");
+    let mut x = 0;
+    CLOUDS
+        .iter()
+        .map(|&(_, _, w)| {
+            let img = sheet.crop(x, row * CLOUD_H, w, CLOUD_H);
+            x += w + 1;
+            img
+        })
+        .collect()
+}
+
+/// Where cloud `k`'s top left goes `hours` hours after the Unix epoch.
+pub fn cloud_at(k: usize, hours: u32) -> (i32, i32) {
+    let (x, y, w) = CLOUDS[k];
+    (cloud_x(x, w as i32, W as i32, hours), y)
 }
 
 /// The street in front of the tower, from GROUND_Y to the bottom of the
@@ -290,13 +330,26 @@ pub fn lobby() -> Image {
 }
 
 /// A storey's room before desks and lighting: walls, shaft, wallpaper,
-/// windows and unlit lamp fittings.
-fn room(paper: usize) -> Image {
-    match paper % WALLPAPERS {
-        0 => asset!("storey-0.png"),
-        1 => asset!("storey-1.png"),
-        2 => asset!("storey-2.png"),
-        _ => asset!("storey-3.png"),
+/// windows showing the sky at `time`, and unlit lamp fittings.
+fn room(paper: usize, time: TimeOfDay) -> Image {
+    use TimeOfDay::*;
+    match (paper % WALLPAPERS, time) {
+        (0, Dawn) => asset!("storey-0-dawn.png"),
+        (0, Day) => asset!("storey-0-day.png"),
+        (0, Sunset) => asset!("storey-0-sunset.png"),
+        (0, Night) => asset!("storey-0-night.png"),
+        (1, Dawn) => asset!("storey-1-dawn.png"),
+        (1, Day) => asset!("storey-1-day.png"),
+        (1, Sunset) => asset!("storey-1-sunset.png"),
+        (1, Night) => asset!("storey-1-night.png"),
+        (2, Dawn) => asset!("storey-2-dawn.png"),
+        (2, Day) => asset!("storey-2-day.png"),
+        (2, Sunset) => asset!("storey-2-sunset.png"),
+        (2, Night) => asset!("storey-2-night.png"),
+        (_, Dawn) => asset!("storey-3-dawn.png"),
+        (_, Day) => asset!("storey-3-day.png"),
+        (_, Sunset) => asset!("storey-3-sunset.png"),
+        (_, Night) => asset!("storey-3-night.png"),
     }
 }
 
@@ -323,11 +376,12 @@ fn moonlit(img: &mut Image, x0: i32, x1: i32, rows: i32) {
 }
 
 /// A storey of offices in wallpaper `paper` (counted modulo
-/// [`WALLPAPERS`]), with its desks, and its lamps on if `lit`; otherwise the
-/// room is tinted by moonlight falling through the windows. Agents are drawn
-/// over it with [`behind_desk`]; its [`decor`] and number go on separately.
-pub fn storey(paper: usize, lit: bool) -> Image {
-    let mut img = room(paper);
+/// [`WALLPAPERS`]) at `time`, with its desks, and its lamps on if `lit`;
+/// otherwise, at night, the room is tinted by moonlight falling through the
+/// windows. Agents are drawn over it with [`behind_desk`]; its [`decor`] and
+/// number go on separately.
+pub fn storey(paper: usize, lit: bool, time: TimeOfDay) -> Image {
+    let mut img = room(paper, time);
     let desk = desk();
     for i in 0..DESKS_PER_STOREY {
         let (dx, dy) = desk_at(i);
@@ -338,7 +392,7 @@ pub fn storey(paper: usize, lit: bool) -> Image {
         for x in lamp_xs() {
             img.draw(&lamp, x - LAMP_CENTRE, 0);
         }
-    } else {
+    } else if time == TimeOfDay::Night {
         moonlit(&mut img, ROOMS_X, ROOMS_END, INNER + 1);
         let beam = sprite(|s| s.moonbeam);
         for i in 0..DESKS_PER_STOREY {
@@ -349,7 +403,8 @@ pub fn storey(paper: usize, lit: bool) -> Image {
 }
 
 /// Decor `kind` (counted modulo [`DECORS`]) for a storey's right end, lit or
-/// by moonlight. It goes at [`DECOR_AT`].
+/// by moonlight; by day, a storey with its lights off shows it lit. It goes
+/// at [`DECOR_AT`].
 pub fn decor(kind: usize, lit: bool) -> Image {
     let mut img = match kind % DECORS {
         0 => sprite(|s| s.decor_0),
@@ -622,12 +677,17 @@ mod tests {
 
     #[test]
     fn assets_have_the_sizes_the_layout_expects() {
-        assert_eq!(size(&backdrop()), (W, H));
+        for t in TimeOfDay::ALL {
+            assert_eq!(size(&backdrop(t)), (W, H), "{t:?}");
+            for p in 0..WALLPAPERS {
+                assert_eq!(size(&room(p, t)), (W, STOREY_H), "storey-{p}-{t:?}");
+            }
+        }
+        let sheet = asset!("clouds.png");
+        let row: usize = CLOUDS.iter().map(|c| c.2 + 1).sum::<usize>() - 1;
+        assert_eq!(size(&sheet), (row, 3 * CLOUD_H));
         assert_eq!(size(&street()), (W, H - GROUND_Y as usize));
         assert_eq!(size(&lobby()), (W, STOREY_H));
-        for p in 0..WALLPAPERS {
-            assert_eq!(size(&room(p)), (W, STOREY_H), "storey-{p}.png");
-        }
         for r in roof() {
             assert_eq!(size(&r), (W, ROOF_H));
         }
@@ -680,19 +740,20 @@ mod tests {
 
     #[test]
     fn backgrounds_are_opaque() {
-        for (name, img) in [
-            ("backdrop", backdrop()),
-            ("street", street()),
-            ("lobby", lobby()),
-        ] {
+        for t in TimeOfDay::ALL {
+            assert!(backdrop(t).px.iter().all(|p| p[3] == 0xff), "{t:?}");
+        }
+        for (name, img) in [("street", street()), ("lobby", lobby())] {
             assert!(img.px.iter().all(|p| p[3] == 0xff), "{name}");
         }
         for p in 0..WALLPAPERS {
             for lit in [true, false] {
-                assert!(
-                    storey(p, lit).px.iter().all(|p| p[3] == 0xff),
-                    "storey {p} lit {lit}"
-                );
+                for t in TimeOfDay::ALL {
+                    assert!(
+                        storey(p, lit, t).px.iter().all(|p| p[3] == 0xff),
+                        "storey {p} lit {lit} {t:?}"
+                    );
+                }
             }
         }
     }
@@ -891,9 +952,10 @@ mod tests {
 
     #[test]
     fn lights_change_the_storey_and_decor_and_wallpapers_differ() {
-        assert_ne!(storey(0, true), storey(0, false));
-        assert_ne!(storey(0, true), storey(1, true));
-        assert_eq!(storey(0, true), storey(WALLPAPERS, true));
+        let night = TimeOfDay::Night;
+        assert_ne!(storey(0, true, night), storey(0, false, night));
+        assert_ne!(storey(0, true, night), storey(1, true, night));
+        assert_eq!(storey(0, true, night), storey(WALLPAPERS, true, night));
         assert_ne!(decor(0, true), decor(0, false));
         assert_eq!(decor(0, true), decor(DECORS, true));
     }
@@ -905,7 +967,7 @@ mod tests {
         for m in animation(Status::Working).0 {
             let s = slot(2);
             let (dx, dy) = desk_at(2);
-            let mut room = room(0);
+            let mut room = room(0, TimeOfDay::Night);
             let mut expected = room.clone();
             expected.draw(&m, s.mascot.0, s.mascot.1);
             expected.draw(&desk(), dx, dy);
@@ -913,6 +975,45 @@ mod tests {
             room.draw(&behind_desk(&m), s.mascot.0, s.mascot.1);
             assert_eq!(room, expected);
         }
+    }
+
+    #[test]
+    fn times_of_day_differ_and_only_night_is_moonlit() {
+        let skies: Vec<Image> = TimeOfDay::ALL.map(backdrop).into();
+        for (i, a) in skies.iter().enumerate() {
+            for b in &skies[i + 1..] {
+                assert_ne!(a, b);
+            }
+        }
+        assert_ne!(
+            storey(0, true, TimeOfDay::Day),
+            storey(0, true, TimeOfDay::Night)
+        );
+        // A dark storey's wallpaper and windows are the room's, untinted,
+        // except at night.
+        let wall = (ROOMS_X as usize + 1, 25);
+        let window = (desk_centre(0) as usize, 8);
+        for t in TimeOfDay::ALL {
+            let (dark, room) = (storey(0, false, t), room(0, t));
+            for (x, y) in [wall, window] {
+                let same = dark.get(x, y) == room.get(x, y);
+                assert_eq!(same, t != TimeOfDay::Night, "{t:?} at ({x}, {y})");
+            }
+        }
+        assert!(clouds(TimeOfDay::Night).is_empty());
+        for t in [TimeOfDay::Dawn, TimeOfDay::Day, TimeOfDay::Sunset] {
+            let c = clouds(t);
+            assert_eq!(c.len(), CLOUDS.len());
+            for (k, img) in c.iter().enumerate() {
+                assert_eq!(
+                    drawn_columns(img),
+                    (0, CLOUDS[k].2 as i32 - 1),
+                    "{t:?} cloud {k}"
+                );
+                assert!(CLOUDS[k].1 >= 0 && CLOUDS[k].1 + CLOUD_H as i32 <= GROUND_Y);
+            }
+        }
+        assert_eq!(cloud_at(0, 0), (CLOUDS[0].0, CLOUDS[0].1));
     }
 
     #[test]

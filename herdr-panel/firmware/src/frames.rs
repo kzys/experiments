@@ -3,7 +3,7 @@
 
 use alloc::boxed::Box;
 
-use herdr_panel_protocol::Status;
+use herdr_panel_protocol::{Status, TimeOfDay};
 
 /// One looping animation.
 pub struct Loop {

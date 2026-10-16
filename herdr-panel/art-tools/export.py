@@ -1,6 +1,8 @@
 """Exports the demo's look as herdr-panel's art: the full-width pieces as
-their own PNGs, the small sprites and the mascot's animations packed into
-sprites.png with sprites.yaml naming where each one is.
+their own PNGs (the sky and the storeys' rooms, whose windows show it, once
+per time of day), the clouds of each time of day in clouds.png, and the
+small sprites and the mascot's animations packed into sprites.png with
+sprites.yaml naming where each one is.
 
 Usage: python export.py ../assets (needs pypng)
 """
@@ -170,17 +172,35 @@ def pack(parts, width=200):
 def main():
     out = sys.argv[1]
     os.makedirs(out, exist_ok=True)
-    img = blank()
-    d["backdrop"](img)
-    img.save(os.path.join(out, "backdrop.png"))
+    for t in d["TIMES"]:
+        d["set_time"](t)
+        img = blank()
+        d["backdrop"](img)
+        img.save(os.path.join(out, f"backdrop-{t}.png"))
+        for p in range(4):
+            storey_room(p).save(os.path.join(out, f"storey-{p}-{t}.png"))
+    # Clouds: a row per time of day that has them, in TIMES's order, each
+    # cloud a pixel right of the last.
+    rows = [spec["clouds"] for spec in d["TIMES"].values() if spec["clouds"]]
+    ws = [w for _, _, w in d["CLOUDS"]]
+    ch = d["CLOUD_H"]
+    sheet = Img(sum(ws) + len(ws) - 1, ch * len(rows))
+    for r, colours in enumerate(rows):
+        x = 0
+        for (cx, _, w) in d["CLOUDS"]:
+            c = d["cloud"](w, cx, colours)
+            for yy in range(ch):
+                for xx in range(w):
+                    sheet.px[r * ch + yy][x + xx] = c.px[yy][xx]
+            x += w + 1
+    sheet.save(os.path.join(out, "clouds.png"))
+    d["set_time"]("night")
     img = blank()
     d["street"](img)
     crop(img, 0, GROUND, W, H - GROUND).save(os.path.join(out, "street.png"))
     img = blank()
     d["lobby"](img, number=False)
     crop(img, 0, d["storey_top"](0), W, STOREY).save(os.path.join(out, "lobby.png"))
-    for p in range(4):
-        storey_room(p).save(os.path.join(out, f"storey-{p}.png"))
     for name, light in (("roof-on", True), ("roof-off", False)):
         img = blank()
         d["roof"](img, 1, light)

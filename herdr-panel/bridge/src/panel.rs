@@ -6,7 +6,7 @@ use std::{
     time::Duration,
 };
 
-use herdr_panel_protocol::{State, ToHost, messages};
+use herdr_panel_protocol::{State, ToBoard, ToHost, messages};
 use serialport::SerialPort;
 
 /// Writing side of the port, shared with the reader thread, which replaces it
@@ -18,7 +18,18 @@ impl Writer {
     /// Sends `state`, one message per line, in one write. Fails while the
     /// board is not connected.
     pub fn send_state(&self, state: &State) -> Result<(), String> {
-        let text = state_lines(state)?;
+        self.write(&state_lines(state)?)
+    }
+
+    /// Sends one message on its own line. Fails while the board is not
+    /// connected.
+    pub fn send(&self, msg: &ToBoard) -> Result<(), String> {
+        let mut line = serde_json::to_string(msg).map_err(|e| e.to_string())?;
+        line.push('\n');
+        self.write(&line)
+    }
+
+    fn write(&self, text: &str) -> Result<(), String> {
         let mut port = self.0.lock().unwrap_or_else(|e| e.into_inner());
         let port = port.as_mut().ok_or("panel not connected")?;
         port.write_all(text.as_bytes())
