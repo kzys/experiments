@@ -23,6 +23,9 @@ pub const ID_LEN: usize = 16;
 pub const MAX_LINE: usize = 512;
 
 pub type Label = String<LABEL_LEN>;
+
+/// Longest herdr version, in bytes.
+pub const VERSION_LEN: usize = 16;
 pub type Id = String<ID_LEN>;
 
 /// What herdr reports for an agent.
@@ -123,6 +126,11 @@ pub enum ToBoard {
         minute: u16,
         hour: u32,
     },
+    /// The version of herdr's server, such as `0.9.3`. Sent on its own, when
+    /// it changes.
+    Herdr {
+        version: String<VERSION_LEN>,
+    },
 }
 
 /// The messages that send `state`, in order.
@@ -167,7 +175,7 @@ impl Assembler {
                     self.expected = None;
                 }
             }
-            ToBoard::Clock { .. } => {}
+            ToBoard::Clock { .. } | ToBoard::Herdr { .. } => {}
             ToBoard::End => {
                 let complete = self
                     .expected
@@ -331,6 +339,16 @@ mod tests {
             serde_json_core::from_str::<ToBoard>(&json).unwrap().0,
             clock
         );
+    }
+
+    #[test]
+    fn herdrs_version_is_one_short_line() {
+        let msg = ToBoard::Herdr {
+            version: truncated("0.9.3"),
+        };
+        let json = serde_json::to_string(&msg).unwrap();
+        assert_eq!(json, r#"{"Herdr":{"version":"0.9.3"}}"#);
+        assert_eq!(serde_json_core::from_str::<ToBoard>(&json).unwrap().0, msg);
     }
 
     #[test]

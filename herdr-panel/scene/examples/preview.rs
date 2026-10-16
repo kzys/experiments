@@ -11,9 +11,10 @@ use std::{env, fs::File, io::BufWriter};
 
 use herdr_panel_protocol::{Status, TimeOfDay};
 use herdr_panel_scene::{
-    CAR_AT, DECOR_AT, DECORS, DESKS_PER_SPACE, DIGIT_W, GROUND_Y, PLUMBOB_ABOVE, SCALE, SPACE_X,
-    SPACES_PER_STOREY, animation, backdrop, behind_desk, car, cloud_at, clouds, decor, digits,
-    label, label_at, lobby, number_at, plumbob, roof, roof_top, slot, space, storey_top, street,
+    CAR_AT, DECOR_AT, DECORS, DESKS_PER_SPACE, DIGIT_W, GROUND_Y, PLUMBOB_ABOVE, SCALE, SIGN_HALO,
+    SPACE_X, SPACES_PER_STOREY, animation, backdrop, behind_desk, car, cloud_at, clouds, decor,
+    digits, label, label_at, lobby, number_at, plumbob, roof, roof_top, sign, sign_board, slot,
+    space, storey_top, street,
 };
 
 /// Workspace labels.
@@ -121,6 +122,13 @@ fn main() {
         }
     }
     img.draw(&roof()[0], 0, at(roof_top(storeys)));
+    let text = "HERDR 0.9.3";
+    let (sx, sy, _, _) = sign_board(text.len());
+    img.draw(
+        &sign(text),
+        sx - SIGN_HALO.0,
+        at(roof_top(storeys)) + sy - SIGN_HALO.1,
+    );
 
     let img = img.scaled(SCALE, SCALE);
     let mut enc = png::Encoder::new(

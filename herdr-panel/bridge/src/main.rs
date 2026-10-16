@@ -5,15 +5,22 @@
 mod herdr;
 mod panel;
 
-use std::{path::PathBuf, sync::mpsc, thread, time::Duration};
+use std::{
+    path::PathBuf,
+    sync::mpsc,
+    thread,
+    time::{Duration, Instant},
+};
 
 use chrono::{DateTime, TimeZone, Timelike};
 use herdr::Herdr;
-use herdr_panel_protocol::{State, ToBoard, ToHost};
+use herdr_panel_protocol::{State, ToBoard, ToHost, truncated};
 use panel::Writer;
 
 /// How often herdr is polled even without events, in case one is missed.
 const POLL: Duration = Duration::from_secs(2);
+/// How often herdr's version is asked for, besides when the board connects.
+const VERSION_POLL: Duration = Duration::from_secs(60);
 
 enum Wake {
     /// herdr reported a change, or the poll interval passed.
@@ -107,11 +114,15 @@ fn main() {
 
     let mut last: Option<State> = None;
     let mut last_clock: Option<ToBoard> = None;
+    let mut last_version: Option<ToBoard> = None;
+    let mut version_asked: Option<Instant> = None;
     for wake in rx {
         match wake {
             Wake::BoardConnected | Wake::Board(ToHost::Hello) => {
                 last = None;
                 last_clock = None;
+                last_version = None;
+                version_asked = None;
             }
             Wake::Board(ToHost::Focus { agent }) => match herdr.focus_agent(&agent) {
                 Ok(()) => eprintln!("focused {agent}"),
@@ -122,6 +133,23 @@ fn main() {
         let now = clock(&chrono::Local::now());
         if last_clock.as_ref() != Some(&now) && writer.send(&now).is_ok() {
             last_clock = Some(now);
+        }
+        if version_asked.is_none_or(|t| t.elapsed() >= VERSION_POLL) {
+            version_asked = Some(Instant::now());
+            match herdr.version() {
+                Ok(v) => {
+                    let msg = ToBoard::Herdr {
+                        version: truncated(&v),
+                    };
+                    if last_version.as_ref() != Some(&msg) && writer.send(&msg).is_ok() {
+                        last_version = Some(msg);
+                    } else if last_version.as_ref() != Some(&msg) {
+                        // Not connected yet: ask again on the next wake-up.
+                        version_asked = None;
+                    }
+                }
+                Err(e) => eprintln!("{e}"),
+            }
         }
         match herdr.state() {
             Ok(state) if last.as_ref() != Some(&state) => {

@@ -85,7 +85,7 @@ halo).
 | `street.png` | pavement and road below the tower, 320x17 |
 | `lobby.png` | storey 0, 320x36 |
 | `storey-0-dawn.png` .. `storey-3-night.png` | a storey's room in one wallpaper, with the partition between its two spaces, its windows showing each time of day's sky, 320x36, with no desks and the lamps off; each space takes its half from its workspace's wallpaper in turn |
-| `roof-on.png`, `roof-off.png` | the roof, its antenna light on and off, 320x22 |
+| `roof-on.png`, `roof-off.png` | the roof, its antenna light on and off, 320x22, without the neon sign, which is drawn to fit its text |
 | `sprites.png` | the small sprites, decor and mascot, on one sheet; `sprites.yaml` gives each one's `[x, y, width, height]` |
 | `font-5x8.bdf` | the text font: X11's public-domain misc-fixed 5x8, ASCII only; read by the art scripts and `scene` |
 
@@ -139,6 +139,9 @@ only when all announced agents arrived: decoding a whole state at once needs
 several copies of it on the board's stack, which overflowed it. Also bridge to
 board: `{"Clock":{"minute":450,"hour":493838}}` on its own, whenever the
 minute changes: minutes since local midnight, and hours since the Unix epoch.
+And `{"Herdr":{"version":"0.9.3"}}`, herdr's version from its `ping`, when it
+changes: the neon sign on the roof shows it after "HERDR", on a board as wide
+as the text.
 Board to bridge: `"Hello"` (sent at start and every 3 s until a state arrives) and
 `{"Focus":{"agent":"w1:p2"}}`. `status` is `idle`, `working`, `blocked`, `done`
 or `unknown`. Limits: 250 agents, labels cut to 24 bytes. The board shows

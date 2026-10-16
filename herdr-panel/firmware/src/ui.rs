@@ -18,7 +18,9 @@
 
 use alloc::{string::String, vec::Vec};
 use embassy_time::Instant;
-use herdr_panel_protocol::{Id, State, Status, TimeOfDay, ToHost, cloud_x, spaces};
+use herdr_panel_protocol::{
+    Id, State, Status, TimeOfDay, ToHost, VERSION_LEN, cloud_x, heapless, spaces,
+};
 use oxivgl::{
     anim::{ANIM_REPEAT_INFINITE, Anim, anim_path_ease_in_out, anim_set_y},
     enums::{EventCode, ObjFlag, ScrollbarMode},
@@ -34,9 +36,10 @@ use crate::{
         ARROW_SIZE, ARROW_X, CAR_AT, CLOUDS, DECOR_AT, DECORS, DESK_SPACING, DESKS_PER_SPACE,
         DESKS_PER_STOREY, DESKS_X, DIGIT_W, FONT_H, FONT_W, GROUND_Y, LABEL_COLOUR, LABEL_ENDS,
         LABEL_FONT, LABEL_OUTLINE, LABEL_OUTLINE_FONT, LABEL_Y, Loop, NUMBER_AT, PLUMBOB_ABOVE,
-        PLUMBOB_W, ROOF_H, SLOTS, SPACE_X, SPACES_PER_STOREY, STOREY_H, arrow_down_image,
-        arrow_up_image, awake, backdrop_image, car_image, cloud_image, decor_image, digit_image,
-        lobby_image, loops, plumbob, roof, space_image, street_image,
+        PLUMBOB_W, ROOF_H, SIGN_BOARD, SIGN_CENTRE, SIGN_H, SIGN_HALO, SIGN_HALO_OPA, SIGN_INK,
+        SIGN_MARGIN, SIGN_NEON, SIGN_TOP, SLOTS, SPACE_X, SPACES_PER_STOREY, STOREY_H,
+        arrow_down_image, arrow_up_image, awake, backdrop_image, car_image, cloud_image,
+        decor_image, digit_image, lobby_image, loops, plumbob, roof, space_image, street_image,
     },
     link,
     touch::POINTER,
@@ -78,6 +81,8 @@ struct Rendered {
     images: Vec<Image<'static>>,
     sprites: Vec<AnimImg<'static>>,
     labels: Vec<Label<'static>>,
+    /// The neon sign's halo, legs and board.
+    boxes: Vec<Obj<'static>>,
     /// The agents on each storey above the lobby, by desk; `None` at a
     /// free desk.
     storeys: Vec<Vec<Option<Id>>>,
@@ -105,6 +110,13 @@ pub struct Panel {
     /// The styles of a workspace label's text and of its outline.
     label_style: Style,
     outline_style: Style,
+    /// The styles of the neon sign: its halo, board, legs and text.
+    halo_style: Style,
+    board_style: Style,
+    ink_style: Style,
+    neon_style: Style,
+    /// herdr's version, for the sign, once the bridge has sent it.
+    version: Option<heapless::String<VERSION_LEN>>,
     /// How far the content is shifted down so that it starts at 0: what
     /// "the view at the bottom" adds to every y.
     offset: i32,
@@ -141,6 +153,22 @@ impl Panel {
                 s.text_font(LABEL_OUTLINE_FONT)
                     .text_color_hex(LABEL_OUTLINE);
             }),
+            halo_style: Style::new(|s| {
+                s.bg_color_hex(SIGN_NEON).bg_opa(SIGN_HALO_OPA);
+            }),
+            board_style: Style::new(|s| {
+                s.bg_color_hex(SIGN_BOARD)
+                    .bg_opa(255)
+                    .border_color_hex(SIGN_INK)
+                    .border_width(1);
+            }),
+            ink_style: Style::new(|s| {
+                s.bg_color_hex(SIGN_INK).bg_opa(255);
+            }),
+            neon_style: Style::new(|s| {
+                s.text_font(LABEL_FONT).text_color_hex(SIGN_NEON);
+            }),
+            version: None,
             offset: 0,
             follow: None,
             manual_scroll: None,
@@ -244,6 +272,7 @@ impl Panel {
         if let Some(l) = &self.roof {
             r.sprites.push(self.looping(scroller, l, 0, at(roof_top))?);
         }
+        self.sign(&mut r, at(roof_top))?;
         for (k, space) in spaces.iter().enumerate() {
             let top = at(storey_top(k / SPACES_PER_STOREY + 1));
             let first = k % SPACES_PER_STOREY * DESKS_PER_SPACE;
@@ -417,6 +446,51 @@ impl Panel {
         Ok(())
     }
 
+    /// Puts the neon sign on the roof whose top is `top`: "HERDR" and herdr's
+    /// version once known, on a board as wide as the text.
+    fn sign(&self, r: &mut Rendered, top: i32) -> Result<(), WidgetError> {
+        let Some(scroller) = &self.scroller else {
+            return Ok(());
+        };
+        let mut text = String::from("HERDR");
+        if let Some(v) = &self.version {
+            text.push(' ');
+            text.extend(
+                v.chars()
+                    .map(|c| if (' '..='~').contains(&c) { c } else { '?' }),
+            );
+        }
+        let w = FONT_W * text.len() as i32 + SIGN_MARGIN;
+        let (x, y) = (SIGN_CENTRE - w / 2, top + SIGN_TOP);
+        let (side, up, down) = SIGN_HALO;
+        let mut boxed =
+            |style: &Style, x: i32, y: i32, w: i32, h: i32| -> Result<(), WidgetError> {
+                let b = Obj::new(scroller)?;
+                b.remove_style_all();
+                b.add_style(style, Selector::DEFAULT);
+                b.remove_flag(ObjFlag::CLICKABLE);
+                b.size(w, h).pos(x, y);
+                r.boxes.push(b);
+                Ok(())
+            };
+        boxed(
+            &self.halo_style,
+            x - side,
+            y - up,
+            w + 2 * side,
+            SIGN_H + up + down,
+        )?;
+        boxed(&self.ink_style, x + 6, y + SIGN_H, 1, 1)?;
+        boxed(&self.ink_style, x + w - 7, y + SIGN_H, 1, 1)?;
+        boxed(&self.board_style, x, y, w, SIGN_H)?;
+        let label = Label::new(scroller)?;
+        label.add_style(&self.neon_style, Selector::DEFAULT);
+        label.text(&text);
+        label.pos(x + 3, y + 1);
+        r.labels.push(label);
+        Ok(())
+    }
+
     /// Sends the car to storey `level`.
     fn ride_to(&mut self, level: usize) {
         let Some(car) = &self.car else { return };
@@ -538,6 +612,11 @@ impl View for Panel {
                 self.hour = hour;
                 self.show_sky();
             }
+        }
+        let version = link::herdr_version();
+        if version != self.version {
+            self.version = version;
+            redraw = true;
         }
         if let Some(version) = link::newer_into(self.shown, &mut self.state) {
             self.shown = version;

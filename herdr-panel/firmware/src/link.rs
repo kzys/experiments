@@ -9,8 +9,9 @@ use core::cell::RefCell;
 use embassy_sync::blocking_mutex::{Mutex, raw::CriticalSectionRawMutex};
 use embassy_time::{Instant, Timer};
 use esp_hal::{Blocking, usb::usb_serial_jtag::UsbSerialJtagRx};
+use herdr_panel_protocol::heapless::String;
 use herdr_panel_protocol::heapless::Vec;
-use herdr_panel_protocol::{Assembler, MAX_LINE, State, ToBoard, ToHost};
+use herdr_panel_protocol::{Assembler, MAX_LINE, State, ToBoard, ToHost, VERSION_LEN};
 
 struct Shared {
     /// Bumped on every state received; 0 until the first one.
@@ -19,13 +20,21 @@ struct Shared {
     /// The bridge's last clock: minutes since local midnight, and hours
     /// since the Unix epoch.
     clock: Option<(u16, u32)>,
+    /// The version of herdr's server, once the bridge has sent it.
+    herdr_version: Option<String<VERSION_LEN>>,
 }
 
 static SHARED: Mutex<CriticalSectionRawMutex, RefCell<Shared>> = Mutex::new(RefCell::new(Shared {
     version: 0,
     state: State { agents: Vec::new() },
     clock: None,
+    herdr_version: None,
 }));
+
+/// The version of herdr's server, if the bridge has sent it.
+pub fn herdr_version() -> Option<String<VERSION_LEN>> {
+    SHARED.lock(|s| s.borrow().herdr_version.clone())
+}
 
 /// The bridge's last clock, if it has sent one: minutes since local
 /// midnight, and hours since the Unix epoch.
@@ -72,6 +81,9 @@ fn handle_line(line: &[u8], assembler: &mut Assembler) {
     match serde_json_core::from_slice::<ToBoard>(line) {
         Ok((ToBoard::Clock { minute, hour }, _)) => {
             SHARED.lock(|s| s.borrow_mut().clock = Some((minute, hour)));
+        }
+        Ok((ToBoard::Herdr { version }, _)) => {
+            SHARED.lock(|s| s.borrow_mut().herdr_version = Some(version));
         }
         Ok((msg, _)) => {
             if let Some(state) = assembler.push(msg) {

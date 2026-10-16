@@ -948,13 +948,30 @@ def street(img):
         img.fill(x, GROUND + 12, 7, 1, h(0xB89030))
 
 
+# The neon sign on the roof is centred here, and grows with its text.
+SIGN_CENTRE = 155
+
+
+def neon_sign(img, top_storey, label):
+    """The neon sign on the roof over storey `top_storey`, reading `label`:
+    a dark board as wide as the text, on two legs, in a pink halo."""
+    t = storey_top(top_storey) - 13
+    w = FONT_W * len(label) + 5
+    x = SIGN_CENTRE - w // 2
+    for y in range(t - 2, t + 10):
+        for xx in range(x - 4, x + w + 4):
+            img.blend(xx, y, NEON, 0.12)
+    img.fill(x + 6, t + 9, 1, 1, INK)
+    img.fill(x + w - 7, t + 9, 1, 1, INK)
+    img.box(x, t - 1, w, 10, h(0x281828), INK)
+    text(img, x + 3, t, label, NEON)
+
+
 def roof(img, top_storey, light=True):
+    """The roof over storey `top_storey`, without its neon sign; the
+    antenna's light on if `light`."""
     t = storey_top(top_storey) - 13
     hgt = 14
-    sign_x = 140
-    for y in range(t - 2, t + hgt - 3):
-        for x in range(sign_x - 4, sign_x + 34):
-            img.blend(x, y, NEON, 0.12)
     img.box(0, t + hgt - 4, W, 4, STONE["base"], INK)
     img.fill(1, t + hgt - 3, W - 2, 1, STONE["light"])
     img.box(14, t, 15, 9, WOOD["base"], INK)
@@ -967,10 +984,6 @@ def roof(img, top_storey, light=True):
     img.box(60, t + 4, 16, 7, METAL["base"], INK)
     for k in range(3):
         img.fill(62 + k * 4, t + 6, 2, 3, METAL["dark"])
-    img.fill(sign_x + 6, t + 9, 1, 1, INK)
-    img.fill(sign_x + 23, t + 9, 1, 1, INK)
-    img.box(sign_x, t - 1, 30, 10, h(0x281828), INK)
-    text(img, sign_x + 3, t, "HERDR", NEON)
     ax = W - 24
     img.fill(ax, t - 6, 1, hgt + 2, METAL["base"])
     img.fill(ax - 2, t - 2, 5, 1, METAL["base"])
@@ -1062,6 +1075,7 @@ def main():
     for k, spaces in enumerate(storeys):
         storey(img, k + 1, spaces)
     roof(img, len(storeys))
+    neon_sign(img, len(storeys), "HERDR 0.9.3")
     car(img, 1)
     arrow(img, SHAFT_X, 6, True)
     img.save(os.path.join(out, "demo.png"))

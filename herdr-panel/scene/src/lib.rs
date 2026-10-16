@@ -576,9 +576,71 @@ pub fn number_at(len: usize) -> (i32, i32) {
 }
 
 /// The roof over the top storey, its antenna light on in frame 0 and off in
-/// frame 1. Its top goes at [`roof_top`].
+/// frame 1, without its [`sign`]. Its top goes at [`roof_top`].
 pub fn roof() -> [Image; 2] {
     [asset!("roof-on.png"), asset!("roof-off.png")]
+}
+
+/// The neon sign on the roof: the middle of its board, relative to the
+/// roof's left edge, and its colours: the neon, the board and its outline.
+pub const SIGN_CENTRE: i32 = 155;
+pub const SIGN_NEON: Rgba = [0xff, 0x78, 0xc0, 0xff];
+pub const SIGN_BOARD: Rgba = [0x28, 0x18, 0x28, 0xff];
+pub const SIGN_INK: Rgba = [0x18, 0x10, 0x20, 0xff];
+/// How opaque the sign's halo of neon is, of 255.
+pub const SIGN_HALO_OPA: u8 = 31;
+/// How far the halo reaches past the board's sides, above its top, and
+/// below it (to the roof's parapet).
+pub const SIGN_HALO: (i32, i32, i32) = (4, 1, 1);
+
+/// Where the board of a sign reading `len` characters goes, relative to the
+/// roof's top left: its left edge, top, width and height. It is as wide as
+/// the text and a margin, centred on [`SIGN_CENTRE`]; the text's first
+/// character cell is 3 pixels in and 1 down, and a leg stands under it 6
+/// pixels in from each side.
+pub fn sign_board(len: usize) -> (i32, i32, i32, i32) {
+    let w = (FONT_W * len) as i32 + 5;
+    (SIGN_CENTRE - w / 2, 7, w, 10)
+}
+
+/// The neon sign reading `text` (characters outside ASCII as '?'): its
+/// board on two legs in a translucent halo. Its top left goes at the
+/// halo's corner: [`SIGN_HALO`] up and left of the board's.
+pub fn sign(text: &str) -> Image {
+    let len = text.chars().count();
+    let (_, _, w, h) = sign_board(len);
+    let (side, up, down) = SIGN_HALO;
+    let mut img = Image::new((w + 2 * side) as usize, (h + up + down) as usize);
+    for y in 0..img.h as i32 {
+        for x in 0..img.w as i32 {
+            img.blend(x, y, SIGN_NEON, SIGN_HALO_OPA as f32 / 255.0);
+        }
+    }
+    let (bx, by) = (side, up);
+    img.set(bx + 6, by + h, SIGN_INK);
+    img.set(bx + w - 7, by + h, SIGN_INK);
+    for y in by..by + h {
+        for x in bx..bx + w {
+            let edge = y == by || y == by + h - 1 || x == bx || x == bx + w - 1;
+            img.set(x, y, if edge { SIGN_INK } else { SIGN_BOARD });
+        }
+    }
+    let font = font();
+    for (i, c) in text.chars().enumerate() {
+        let g = match c {
+            ' '..='~' => &font[c as usize - 32],
+            _ => &font[b'?' as usize - 32],
+        };
+        for (gy, row) in g.iter().enumerate() {
+            for gx in 0..FONT_W {
+                if row & 0x80 >> gx != 0 {
+                    let x = bx + 3 + (FONT_W * i + gx) as i32;
+                    img.set(x, by + 1 + gy as i32, SIGN_NEON);
+                }
+            }
+        }
+    }
+    img
 }
 
 /// The elevator car.
@@ -1100,6 +1162,42 @@ mod tests {
         img.blend(0, 0, [0xf8, 0xf8, 0xf8, 0xff], 0.5);
         let p = img.get(0, 0);
         assert!(p[0] > 0x60 && p[0] < 0x90 && p[3] == 0xff, "{p:?}");
+    }
+
+    #[test]
+    fn the_sign_fits_its_text_and_stands_on_the_roof() {
+        // The longest the board writes: "HERDR " and a version of
+        // VERSION_LEN bytes.
+        let longest = std::format!("HERDR {}", "9".repeat(herdr_panel_protocol::VERSION_LEN));
+        for text in ["HERDR", "HERDR 0.9.3", &longest] {
+            let len = text.len();
+            let (x, y, w, h) = sign_board(len);
+            // The text, its margins and the halo stay on the roof, clear of
+            // the antenna, and the legs reach the parapet.
+            assert!(
+                x - SIGN_HALO.0 > 76 && x + w + SIGN_HALO.0 < W as i32 - 26,
+                "{text}"
+            );
+            assert_eq!(y + h + SIGN_HALO.2, ROOF_H as i32 - 4, "{text}");
+            assert!(w >= (FONT_W * len) as i32 + 5);
+            let img = sign(text);
+            assert_eq!(
+                size(&img),
+                (
+                    (w + 2 * SIGN_HALO.0) as usize,
+                    (h + SIGN_HALO.1 + SIGN_HALO.2) as usize
+                )
+            );
+        }
+        // The middle stays put as the text grows.
+        let mid = |len| sign_board(len).0 * 2 + sign_board(len).2;
+        assert!((mid(5) - mid(11)).abs() <= 1);
+        let img = sign("H");
+        assert_eq!(
+            img.get(SIGN_HALO.0 as usize + 3, SIGN_HALO.1 as usize + 2),
+            snes(SIGN_NEON)
+        );
+        assert_eq!(img.get(0, 0)[3], SIGN_HALO_OPA);
     }
 
     #[test]

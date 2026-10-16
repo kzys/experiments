@@ -33,10 +33,10 @@ pub const PRIO_FLUSH: u32 = 2;
 /// Render thread — yields to everything above it.
 pub const PRIO_RENDER: u32 = 1;
 
-/// LVGL's draw path is the deep one; the flush side only moves bytes. Sized
-/// from measurements (~27.7 kB and ~8.6 kB of SRAM actually consumed), not
-/// guessed.
-pub const RENDER_STACK: usize = 20 * 1024;
+/// Stack for the render thread, where LVGL's draw path runs deep. 20 kB
+/// overflowed, overwriting the statics just below the heap it comes from;
+/// 28 kB has held, but its high-water mark is not measured.
+pub const RENDER_STACK: usize = 28 * 1024;
 /// Stack for the flush thread — it only moves bytes to the panel.
 pub const FLUSH_STACK: usize = 8 * 1024;
 

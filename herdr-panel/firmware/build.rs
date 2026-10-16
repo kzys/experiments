@@ -22,9 +22,10 @@ use herdr_panel_protocol::{Status, TimeOfDay};
 use herdr_panel_scene::{
     ARROW_SIZE, ARROW_X, CAR_AT, CLOUDS, DECOR_AT, DECORS, DESK_SPACING, DESKS_PER_SPACE,
     DESKS_PER_STOREY, DESKS_X, FONT_DESCENT, FONT_H, FONT_W, GROUND_Y, Image, LABEL_COLOUR,
-    LABEL_ENDS, LABEL_OUTLINE, LABEL_Y, PLUMBOB_ABOVE, ROOF_H, SCALE, SPACE_X, SPACES_PER_STOREY,
-    STOREY_H, WALLPAPERS, animation, arrow, awake_animation, backdrop, behind_desk, car, clouds,
-    decor, digits, font, lobby, number_at, outline, plumbob, roof, slot, space, street,
+    LABEL_ENDS, LABEL_OUTLINE, LABEL_Y, PLUMBOB_ABOVE, ROOF_H, SCALE, SIGN_BOARD, SIGN_CENTRE,
+    SIGN_HALO, SIGN_HALO_OPA, SIGN_INK, SIGN_NEON, SPACE_X, SPACES_PER_STOREY, STOREY_H,
+    WALLPAPERS, animation, arrow, awake_animation, backdrop, behind_desk, car, clouds, decor,
+    digits, font, lobby, number_at, outline, plumbob, roof, sign_board, slot, space, street,
 };
 use oxivgl_build::ImageConfig;
 
@@ -428,6 +429,20 @@ fn main() {
          pub const LABEL_ENDS: [i32; {SPACES_PER_STOREY}] = [{label_ends}];\n\
          pub const LABEL_Y: i32 = {label_y};\n\
          pub const LABEL_COLOUR: u32 = {label_colour};\n\
+         /// The neon sign on the roof, relative to the roof's top left: the middle\n\
+         /// of its board, the board's top and height, and how much wider than its\n\
+         /// text it is; the text is 3 pixels in and 1 down, a leg 6 pixels in from\n\
+         /// each side. Then how far the halo reaches past its sides, above and\n\
+         /// below, how opaque it is, and the colours.\n\
+         pub const SIGN_CENTRE: i32 = {sign_centre};\n\
+         pub const SIGN_TOP: i32 = {sign_top};\n\
+         pub const SIGN_H: i32 = {sign_h};\n\
+         pub const SIGN_MARGIN: i32 = {sign_margin};\n\
+         pub const SIGN_HALO: (i32, i32, i32) = {sign_halo:?};\n\
+         pub const SIGN_HALO_OPA: u8 = {SIGN_HALO_OPA};\n\
+         pub const SIGN_NEON: u32 = {sign_neon};\n\
+         pub const SIGN_BOARD: u32 = {sign_board_c};\n\
+         pub const SIGN_INK: u32 = {sign_ink};\n\
          pub const LABEL_OUTLINE: u32 = {label_outline};\n\
          /// Each cloud's left edge and top with no drift, and its width.\n\
          pub const CLOUDS: [(i32, i32, i32); {n_clouds}] = [{clouds_at}];\n\
@@ -465,6 +480,14 @@ fn main() {
             .collect::<Vec<_>>()
             .join(", "),
         label_colour = hex(LABEL_COLOUR),
+        sign_centre = SIGN_CENTRE,
+        sign_top = sign_board(0).1,
+        sign_h = sign_board(0).3,
+        sign_margin = sign_board(0).2,
+        sign_halo = SIGN_HALO,
+        sign_neon = hex(SIGN_NEON),
+        sign_board_c = hex(SIGN_BOARD),
+        sign_ink = hex(SIGN_INK),
         label_outline = hex(LABEL_OUTLINE),
     );
     fs::write(out.join("frames.rs"), source).unwrap();
