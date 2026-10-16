@@ -333,9 +333,38 @@ pub fn street() -> Image {
     asset!("street.png")
 }
 
-/// The lobby, storey 0.
+/// The lobby, storey 0, its [`TICKER`] dark.
 pub fn lobby() -> Image {
     asset!("lobby.png")
+}
+
+/// The lobby's LED ticker: its board's left edge, top, width and height,
+/// relative to the lobby. Its text runs in a window a pixel inside the
+/// board's frame, in `TICKER_LED`.
+pub const TICKER: (i32, i32, i32, i32) = (136, 5, 80, 10);
+pub const TICKER_LED: Rgba = [0xf8, 0xb0, 0x40, 0xff];
+
+/// The start of `message` on the ticker, as much as fits: an image the size
+/// of its window, transparent but for the lit LEDs. Characters outside ASCII
+/// show as '?'.
+pub fn ticker_text(message: &str) -> Image {
+    let (_, _, w, h) = TICKER;
+    let mut img = Image::new((w - 2) as usize, (h - 2) as usize);
+    let font = font();
+    for (i, c) in message.chars().enumerate() {
+        let g = match c {
+            ' '..='~' => &font[c as usize - 32],
+            _ => &font[b'?' as usize - 32],
+        };
+        for (y, row) in g.iter().enumerate() {
+            for x in 0..FONT_W {
+                if row & 0x80 >> x != 0 {
+                    img.set(1 + (FONT_W * i + x) as i32, y as i32, TICKER_LED);
+                }
+            }
+        }
+    }
+    img
 }
 
 /// A storey's room before desks and lighting: walls, shaft, wallpaper,
@@ -1198,6 +1227,30 @@ mod tests {
             snes(SIGN_NEON)
         );
         assert_eq!(img.get(0, 0)[3], SIGN_HALO_OPA);
+    }
+
+    #[test]
+    fn the_ticker_hangs_in_the_lobby_clear_of_the_plants() {
+        let (x, y, w, h) = TICKER;
+        let lobby = lobby();
+        // Its window is the board's dark colour, framed.
+        let inside = lobby.get((x + 1) as usize, (y + 1) as usize);
+        for (px, py) in [
+            (x + 1, y + h - 2),
+            (x + w - 2, y + 1),
+            (x + w / 2, y + h / 2),
+        ] {
+            assert_eq!(lobby.get(px as usize, py as usize), inside);
+        }
+        assert_ne!(lobby.get(x as usize, y as usize), inside);
+        assert!(y + h < INNER - 9, "above the bench");
+        let t = ticker_text("ab");
+        assert_eq!(size(&t), ((w - 2) as usize, (h - 2) as usize));
+        assert!(t.px.iter().any(|p| *p == snes(TICKER_LED)));
+        assert_eq!(
+            ticker_text(""),
+            Image::new((w - 2) as usize, (h - 2) as usize)
+        );
     }
 
     #[test]

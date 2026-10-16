@@ -9,6 +9,7 @@
 
 pub use heapless;
 use heapless::{String, Vec};
+
 use serde::{Deserialize, Serialize};
 
 /// Most agents the panel shows.
@@ -269,6 +270,104 @@ pub fn spaces(agents: &[Agent], per_space: usize) -> impl Iterator<Item = Space<
     })
 }
 
+/// How many agents [`Attention`] keeps in order; past that, more are
+/// counted but not named until there is room.
+pub const ATTENTION_LEN: usize = 32;
+/// How many of them the ticker names before saying how many more there are.
+pub const TICKER_SHOWN: usize = 6;
+
+/// Whether `a` needs you: blocked, waiting for you, or done.
+fn needs(a: &Agent) -> bool {
+    matches!(a.status, Status::Blocked | Status::Done)
+}
+
+/// The agents that need you, for the lobby's ticker: those blocked, waiting
+/// for you, and those done. It remembers when each started to, across
+/// states, so the most recent can come first.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct Attention {
+    /// Most recent first.
+    order: Vec<(Id, Status), ATTENTION_LEN>,
+}
+
+impl Attention {
+    pub const fn new() -> Self {
+        Self { order: Vec::new() }
+    }
+
+    /// Takes the latest `agents`: forgets those that no longer need you, and
+    /// puts those that newly do, or now for another reason, first, while
+    /// there is room.
+    pub fn update(&mut self, agents: &[Agent]) {
+        self.order.retain(|(id, status)| {
+            agents
+                .iter()
+                .any(|a| a.id == *id && a.status == *status && needs(a))
+        });
+        for a in agents.iter().filter(|a| needs(a)) {
+            if self.order.is_full() {
+                break;
+            }
+            if !self.order.iter().any(|(id, _)| *id == a.id) {
+                // There is room, and an Id fits its own type.
+                let _ = self.order.insert(0, (a.id.clone(), a.status));
+            }
+        }
+    }
+
+    /// The agents in the order the ticker names them: the blocked ones, then
+    /// the done ones, each most recent first.
+    pub fn ids(&self) -> impl Iterator<Item = &Id> {
+        let of = move |s: Status| self.order.iter().filter(move |(_, st)| *st == s);
+        of(Status::Blocked)
+            .chain(of(Status::Done))
+            .map(|(id, _)| id)
+    }
+
+    /// Writes the ticker's message about `agents`, the state [`update`] last
+    /// took: each agent in [`ids`] order as "workspace: name is waiting" or
+    /// "... is done" (just the workspace when the agent has no name of its
+    /// own), " - " between them, at most [`TICKER_SHOWN`] and then how many
+    /// more; nothing if none needs you.
+    ///
+    /// [`update`]: Self::update
+    /// [`ids`]: Self::ids
+    pub fn write(&self, agents: &[Agent], out: &mut impl core::fmt::Write) -> core::fmt::Result {
+        let total = agents.iter().filter(|a| needs(a)).count();
+        let mut shown = 0;
+        for id in self.ids() {
+            let Some(a) = agents.iter().find(|a| a.id == *id) else {
+                continue;
+            };
+            if shown == TICKER_SHOWN {
+                break;
+            }
+            if shown > 0 {
+                out.write_str(" - ")?;
+            }
+            shown += 1;
+            let ws = if a.workspace.is_empty() {
+                a.id.as_str()
+            } else {
+                a.workspace.as_str()
+            };
+            out.write_str(ws)?;
+            if !a.label.is_empty() && a.label != a.workspace {
+                write!(out, ": {}", a.label)?;
+            }
+            out.write_str(if a.status == Status::Blocked {
+                " is waiting"
+            } else {
+                " is done"
+            })?;
+        }
+        match total {
+            n if n > shown => write!(out, " - {} more", n - shown),
+            _ => Ok(()),
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     extern crate std;
@@ -523,6 +622,74 @@ mod tests {
         a[1].focused = false;
         a[0].status = Status::Working;
         assert!(lit(&a));
+    }
+
+    fn ticker(att: &Attention, agents: &[Agent]) -> std::string::String {
+        let mut s = std::string::String::new();
+        att.write(agents, &mut s).unwrap();
+        s
+    }
+
+    #[test]
+    fn the_ticker_names_blocked_then_done_agents_newest_first() {
+        let mut a = agents(&["w1:p1", "w1:p2", "w2:p1"]);
+        a[0].label = truncated("reviewer");
+        let mut att = Attention::new();
+        att.update(&a);
+        assert_eq!(ticker(&att, &a), "");
+        a[2].status = Status::Done;
+        att.update(&a);
+        a[1].status = Status::Done;
+        att.update(&a);
+        assert_eq!(ticker(&att, &a), "w1 is done - w2 is done");
+        a[0].status = Status::Blocked;
+        att.update(&a);
+        assert_eq!(
+            ticker(&att, &a),
+            "w1: reviewer is waiting - w1 is done - w2 is done"
+        );
+        let first: std::vec::Vec<&str> = att.ids().map(|id| id.as_str()).collect();
+        assert_eq!(first, ["w1:p1", "w1:p2", "w2:p1"]);
+        // Back to work: off the ticker. Done again later: first among the done.
+        a[1].status = Status::Working;
+        att.update(&a);
+        a[1].status = Status::Done;
+        att.update(&a);
+        assert_eq!(
+            ticker(&att, &a),
+            "w1: reviewer is waiting - w1 is done - w2 is done"
+        );
+        a[2].status = Status::Idle;
+        att.update(&a);
+        assert_eq!(ticker(&att, &a), "w1: reviewer is waiting - w1 is done");
+        // An agent that is gone is forgotten.
+        att.update(&a[..1]);
+        assert_eq!(ticker(&att, &a[..1]), "w1: reviewer is waiting");
+    }
+
+    #[test]
+    fn the_ticker_counts_what_it_does_not_name() {
+        let ids: std::vec::Vec<std::string::String> =
+            (0..40).map(|i| std::format!("w{i}:p1")).collect();
+        let mut a = agents(&ids.iter().map(|s| s.as_str()).collect::<std::vec::Vec<_>>());
+        for x in &mut a {
+            x.status = Status::Done;
+        }
+        let mut att = Attention::new();
+        att.update(&a);
+        assert_eq!(att.ids().count(), ATTENTION_LEN);
+        let t = ticker(&att, &a);
+        assert!(
+            t.ends_with(&std::format!(" - {} more", 40 - TICKER_SHOWN)),
+            "{t}"
+        );
+        assert_eq!(t.matches(" is done").count(), TICKER_SHOWN);
+        // Those it has no room for do not push the others around.
+        let before: std::vec::Vec<Id> = att.ids().cloned().collect();
+        att.update(&a);
+        att.update(&a);
+        let after: std::vec::Vec<Id> = att.ids().cloned().collect();
+        assert_eq!(before, after);
     }
 
     #[test]

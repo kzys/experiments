@@ -23,9 +23,9 @@ use herdr_panel_scene::{
     ARROW_SIZE, ARROW_X, CAR_AT, CLOUDS, DECOR_AT, DECORS, DESK_SPACING, DESKS_PER_SPACE,
     DESKS_PER_STOREY, DESKS_X, FONT_DESCENT, FONT_H, FONT_W, GROUND_Y, Image, LABEL_COLOUR,
     LABEL_ENDS, LABEL_OUTLINE, LABEL_Y, PLUMBOB_ABOVE, ROOF_H, SCALE, SIGN_BOARD, SIGN_CENTRE,
-    SIGN_HALO, SIGN_HALO_OPA, SIGN_INK, SIGN_NEON, SPACE_X, SPACES_PER_STOREY, STOREY_H,
-    WALLPAPERS, animation, arrow, awake_animation, backdrop, behind_desk, car, clouds, decor,
-    digits, font, lobby, number_at, outline, plumbob, roof, sign_board, slot, space, street,
+    SIGN_HALO, SIGN_HALO_OPA, SIGN_INK, SIGN_NEON, SPACE_X, SPACES_PER_STOREY, STOREY_H, TICKER,
+    TICKER_LED, WALLPAPERS, animation, arrow, awake_animation, backdrop, behind_desk, car, clouds,
+    decor, digits, font, lobby, number_at, outline, plumbob, roof, sign_board, slot, space, street,
 };
 use oxivgl_build::ImageConfig;
 
@@ -443,6 +443,10 @@ fn main() {
          pub const SIGN_NEON: u32 = {sign_neon};\n\
          pub const SIGN_BOARD: u32 = {sign_board_c};\n\
          pub const SIGN_INK: u32 = {sign_ink};\n\
+         /// The lobby's LED ticker: its board's left edge, top, width and height,\n\
+         /// relative to the lobby; its text runs a pixel inside, in `TICKER_LED`.\n\
+         pub const TICKER: (i32, i32, i32, i32) = {ticker:?};\n\
+         pub const TICKER_LED: u32 = {ticker_led};\n\
          pub const LABEL_OUTLINE: u32 = {label_outline};\n\
          /// Each cloud's left edge and top with no drift, and its width.\n\
          pub const CLOUDS: [(i32, i32, i32); {n_clouds}] = [{clouds_at}];\n\
@@ -488,6 +492,8 @@ fn main() {
         sign_neon = hex(SIGN_NEON),
         sign_board_c = hex(SIGN_BOARD),
         sign_ink = hex(SIGN_INK),
+        ticker = TICKER,
+        ticker_led = hex(TICKER_LED),
         label_outline = hex(LABEL_OUTLINE),
     );
     fs::write(out.join("frames.rs"), source).unwrap();

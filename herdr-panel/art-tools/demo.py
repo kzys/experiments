@@ -867,7 +867,30 @@ def spaces_of(workspaces):
     return [spaces[k : k + 2] for k in range(0, len(spaces), 2)]
 
 
-def lobby(img, number=True):
+# The LED ticker in the lobby, between the plants and above the bench:
+# its board's left edge, top, width and height relative to the lobby, and
+# its LEDs' colour. The text runs in a window a pixel inside the frame.
+TICKER = (136, 5, 80, 10)
+LED = h(0xF8B040)
+
+
+def ticker(img, top, message=None):
+    """The LED ticker of the lobby whose top is `top`: a dark board hung
+    from the ceiling, showing as much of `message` as fits, if given."""
+    x, y, w, hh = TICKER
+    y += top
+    for hx in (x + 6, x + w - 7):
+        img.fill(hx, top + 2, 1, y - top - 2, METAL["dark"])
+    img.box(x, y, w, hh, h(0x201820), METAL["dark"])
+    if message:
+        strip = Img(w - 2, hh - 2)
+        text(strip, 1, 0, message, LED)
+        img.paste(strip, x + 1, y + 1)
+
+
+def lobby(img, number=True, message=None):
+    """The lobby, storey 0, with its number on the shaft if `number`, and
+    its ticker showing `message` if given."""
     top = storey_top(0)
     p = ramp(0xF0E8D8, 0xD8D0C0, 0xB0A898)
     shell(img, top, p, 0, number)
@@ -929,6 +952,7 @@ def lobby(img, number=True):
             img.set(door_x - 3 + dx, top + 3 + k, stripe[part])
     img.fill(door_x - 3, top + 7, 46, 1, INK)
     lamps(img, top, True, split=False)
+    ticker(img, top, message)
 
 
 def street(img):
@@ -1056,7 +1080,7 @@ def main():
     backdrop(img)
     clouds(img)
     street(img)
-    lobby(img)
+    lobby(img, message="dotfiles: reviewer is waiting")
     storeys = spaces_of([
         (0, ["working", "working", "blocked", "idle", "working", "done"], 1),
         (1, ["done", "working", "unknown", "working", "idle", "working", "working", "blocked"], None),

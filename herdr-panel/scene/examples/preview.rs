@@ -12,9 +12,9 @@ use std::{env, fs::File, io::BufWriter};
 use herdr_panel_protocol::{Status, TimeOfDay};
 use herdr_panel_scene::{
     CAR_AT, DECOR_AT, DECORS, DESKS_PER_SPACE, DIGIT_W, GROUND_Y, PLUMBOB_ABOVE, SCALE, SIGN_HALO,
-    SPACE_X, SPACES_PER_STOREY, animation, backdrop, behind_desk, car, cloud_at, clouds, decor,
-    digits, label, label_at, lobby, number_at, plumbob, roof, roof_top, sign, sign_board, slot,
-    space, storey_top, street,
+    SPACE_X, SPACES_PER_STOREY, TICKER, animation, backdrop, behind_desk, car, cloud_at, clouds,
+    decor, digits, label, label_at, lobby, number_at, plumbob, roof, roof_top, sign, sign_board,
+    slot, space, storey_top, street, ticker_text,
 };
 
 /// Workspace labels.
@@ -75,6 +75,12 @@ fn main() {
     let at = |y: i32| y + scroll;
     img.draw(&street(), 0, at(GROUND_Y));
     img.draw(&lobby(), 0, at(storey_top(0)));
+    let (tx, ty, _, _) = TICKER;
+    img.draw(
+        &ticker_text("dotfiles: reviewer is waiting"),
+        tx + 1,
+        at(storey_top(0)) + ty + 1,
+    );
     let digits = digits();
     for k in 0..storeys {
         let level = k + 1;

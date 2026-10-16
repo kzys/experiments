@@ -19,7 +19,7 @@
 use alloc::{string::String, vec::Vec};
 use embassy_time::Instant;
 use herdr_panel_protocol::{
-    Id, State, Status, TimeOfDay, ToHost, VERSION_LEN, cloud_x, heapless, spaces,
+    Attention, Id, State, Status, TimeOfDay, ToHost, VERSION_LEN, cloud_x, heapless, spaces,
 };
 use oxivgl::{
     anim::{ANIM_REPEAT_INFINITE, Anim, anim_path_ease_in_out, anim_set_y},
@@ -28,7 +28,7 @@ use oxivgl::{
     indev::PointerIndev,
     style::{Selector, Style},
     view::{NavAction, View, register_event_on},
-    widgets::{AnimImg, AsLvHandle, Image, Label, Obj, WidgetError},
+    widgets::{AnimImg, AsLvHandle, Image, Label, LabelLongMode, Obj, WidgetError},
 };
 
 use crate::{
@@ -37,9 +37,10 @@ use crate::{
         DESKS_PER_STOREY, DESKS_X, DIGIT_W, FONT_H, FONT_W, GROUND_Y, LABEL_COLOUR, LABEL_ENDS,
         LABEL_FONT, LABEL_OUTLINE, LABEL_OUTLINE_FONT, LABEL_Y, Loop, NUMBER_AT, PLUMBOB_ABOVE,
         PLUMBOB_W, ROOF_H, SIGN_BOARD, SIGN_CENTRE, SIGN_H, SIGN_HALO, SIGN_HALO_OPA, SIGN_INK,
-        SIGN_MARGIN, SIGN_NEON, SIGN_TOP, SLOTS, SPACE_X, SPACES_PER_STOREY, STOREY_H,
-        arrow_down_image, arrow_up_image, awake, backdrop_image, car_image, cloud_image,
-        decor_image, digit_image, lobby_image, loops, plumbob, roof, space_image, street_image,
+        SIGN_MARGIN, SIGN_NEON, SIGN_TOP, SLOTS, SPACE_X, SPACES_PER_STOREY, STOREY_H, TICKER,
+        TICKER_LED, arrow_down_image, arrow_up_image, awake, backdrop_image, car_image,
+        cloud_image, decor_image, digit_image, lobby_image, loops, plumbob, roof, space_image,
+        street_image,
     },
     link,
     touch::POINTER,
@@ -83,9 +84,9 @@ struct Rendered {
     labels: Vec<Label<'static>>,
     /// The neon sign's halo, legs and board.
     boxes: Vec<Obj<'static>>,
-    /// The agents on each storey above the lobby, by desk; `None` at a
-    /// free desk.
-    storeys: Vec<Vec<Option<Id>>>,
+    /// The agents on each storey above the lobby, by desk, as indices into
+    /// the state's agents; `None` at a free desk.
+    storeys: Vec<[Option<u16>; DESKS_PER_STOREY]>,
 }
 
 pub struct Panel {
@@ -115,6 +116,12 @@ pub struct Panel {
     board_style: Style,
     ink_style: Style,
     neon_style: Style,
+    led_style: Style,
+    /// The agents that need you, for the lobby's ticker, which names them
+    /// and focuses the first when tapped. It lives across renders so that
+    /// its scrolling carries on.
+    attention: Attention,
+    ticker: Option<Label<'static>>,
     /// herdr's version, for the sign, once the bridge has sent it.
     version: Option<heapless::String<VERSION_LEN>>,
     /// How far the content is shifted down so that it starts at 0: what
@@ -168,6 +175,11 @@ impl Panel {
             neon_style: Style::new(|s| {
                 s.text_font(LABEL_FONT).text_color_hex(SIGN_NEON);
             }),
+            led_style: Style::new(|s| {
+                s.text_font(LABEL_FONT).text_color_hex(TICKER_LED);
+            }),
+            attention: Attention::new(),
+            ticker: None,
             version: None,
             offset: 0,
             follow: None,
@@ -232,10 +244,12 @@ impl Panel {
         r.images
             .push(self.image(scroller, lobby_image(), 0, at(storey_top(0)))?);
         let mut focused = 0;
+        // Spaces take the agents in order, so this counts their index.
+        let mut index = 0u16;
         for (k, pair) in spaces.chunks(SPACES_PER_STOREY).enumerate() {
             let level = k + 1;
             let top = at(storey_top(level));
-            let mut desks = alloc::vec![None; DESKS_PER_STOREY];
+            let mut desks = [None; DESKS_PER_STOREY];
             let mut right_lit = false;
             for side in 0..SPACES_PER_STOREY {
                 // An empty right space has the left one's wallpaper, and is dark.
@@ -252,7 +266,8 @@ impl Panel {
                 let Some(space) = space else { continue };
                 self.label(&mut r, space.label(), side, top)?;
                 for (i, a) in space.agents.iter().enumerate() {
-                    desks[side * DESKS_PER_SPACE + i] = Some(a.id.clone());
+                    desks[side * DESKS_PER_SPACE + i] = Some(index);
+                    index += 1;
                     if a.focused {
                         focused = level;
                     }
@@ -273,6 +288,7 @@ impl Panel {
             r.sprites.push(self.looping(scroller, l, 0, at(roof_top))?);
         }
         self.sign(&mut r, at(roof_top))?;
+        self.show_ticker(at(storey_top(0)));
         for (k, space) in spaces.iter().enumerate() {
             let top = at(storey_top(k / SPACES_PER_STOREY + 1));
             let first = k % SPACES_PER_STOREY * DESKS_PER_SPACE;
@@ -491,6 +507,25 @@ impl Panel {
         Ok(())
     }
 
+    /// Shows the ticker's message on the lobby whose top is `top`, in front
+    /// of it, scrolling round when it is longer than the window. Characters
+    /// outside ASCII show as '?'.
+    fn show_ticker(&self, top: i32) {
+        let Some(label) = &self.ticker else { return };
+        let mut message = String::new();
+        // Writing to a String does not fail.
+        let _ = self.attention.write(&self.state.agents, &mut message);
+        let message: String = message
+            .chars()
+            .map(|c| if (' '..='~').contains(&c) { c } else { '?' })
+            .collect();
+        let (x, y, _, _) = TICKER;
+        // The same text again leaves its scrolling alone.
+        label.text(&message);
+        label.pos(x + 2, top + y + 1);
+        label.move_foreground();
+    }
+
     /// Sends the car to storey `level`.
     fn ride_to(&mut self, level: usize) {
         let Some(car) = &self.car else { return };
@@ -541,11 +576,12 @@ impl Panel {
         }
         let y = p.y + scroller.get_scroll_y() - self.offset;
         let (level, desk) = desk_under(p.x, y)?;
-        self.rendered
+        let i = (*self
+            .rendered
             .storeys
             .get(level.checked_sub(1)?)?
-            .get(desk)?
-            .clone()
+            .get(desk)?)?;
+        self.state.agents.get(i as usize).map(|a| a.id.clone())
     }
 }
 
@@ -575,6 +611,17 @@ impl View for Panel {
         car.pos(CAR_AT.0, storey_top(0) + CAR_AT.1);
         self.car = Some(car);
         self.scroller = Some(scroller);
+        if let Some(scroller) = &self.scroller {
+            let (_, _, w, h) = TICKER;
+            let label = Label::new(scroller)?;
+            label.add_style(&self.led_style, Selector::DEFAULT);
+            label.set_long_mode(LabelLongMode::ScrollCircular);
+            label.size(w - 3, h - 2);
+            label.add_flag(ObjFlag::CLICKABLE);
+            let handle = label.handle();
+            self.ticker = Some(label);
+            register_event_on(self, handle);
+        }
 
         for (src, y, slot) in [
             (arrow_up_image(), ARROW_UP_Y, &mut self.up),
@@ -620,6 +667,7 @@ impl View for Panel {
         }
         if let Some(version) = link::newer_into(self.shown, &mut self.state) {
             self.shown = version;
+            self.attention.update(&self.state.agents);
             redraw = true;
         }
         if redraw {
@@ -640,6 +688,12 @@ impl View for Panel {
             self.step(-1);
         } else if pressed(&self.down) {
             self.step(1);
+        } else if let Some(t) = &self.ticker
+            && event.matches(t, EventCode::CLICKED)
+        {
+            if let Some(id) = self.attention.ids().next() {
+                link::send(&ToHost::Focus { agent: id.clone() });
+            }
         } else if let Some(scroller) = &self.scroller
             && event.matches(scroller, EventCode::CLICKED)
             && let Some(id) = self.tapped_agent()

@@ -52,11 +52,14 @@ All Rust, apart from the Python scripts that draw the art.
   them in order, left then right then the next storey up; each space gets the
   workspace's wallpaper and its label at its top right, and each storey gets a
   piece of decor at its right end. The label is in the 5x8 font, outlined
-  (LVGL fonts that `build.rs` makes from it). Each agent is a mascot looping
-  its frames; a green plumbob bobs over the focused one, the elevator car
-  slides to its storey, and the view jumps there unless an arrow was pressed
-  in the last 10 s. LVGL gets 512 KB of PSRAM on top of its 48 KB internal
-  pool, for the widgets of a tall tower.
+  (LVGL fonts that `build.rs` makes from it). An LED ticker in the lobby names
+  the agents that need you, blocked ones then done ones, each most recent
+  first ("dotfiles: reviewer is waiting - herdr-panel is done"), scrolling
+  when it does not fit, and is blank when nobody needs you. Tapping it focuses
+  the first. Each agent is a mascot looping its frames; a green plumbob bobs
+  over the focused one, the elevator car slides to its storey, and the view
+  jumps there unless an arrow was pressed in the last 10 s. LVGL gets 512 KB
+  of PSRAM on top of its 48 KB internal pool, for the widgets of a tall tower.
   `build.rs` renders the images from `scene/` to PNGs at screen size, converts
   them with LVGL's `LVGLImage.py` and compiles them in.
   Separate from the workspace because it needs the Xtensa toolchain
@@ -83,7 +86,7 @@ halo).
 | `backdrop-dawn.png`, `-day`, `-sunset`, `-night` | the sky at each time of day, with its stars and sun or moon, 320x480; stays still. Dithered, so its gradient does not band |
 | `clouds.png` | the clouds: a row per time of day that has them (dawn, day, sunset), 13 high, each cloud a pixel right of the last, as wide as `CLOUDS` in `scene/src/lib.rs` says |
 | `street.png` | pavement and road below the tower, 320x17 |
-| `lobby.png` | storey 0, 320x36 |
+| `lobby.png` | storey 0, 320x36, with the ticker's board dark |
 | `storey-0-dawn.png` .. `storey-3-night.png` | a storey's room in one wallpaper, with the partition between its two spaces, its windows showing each time of day's sky, 320x36, with no desks and the lamps off; each space takes its half from its workspace's wallpaper in turn |
 | `roof-on.png`, `roof-off.png` | the roof, its antenna light on and off, 320x22, without the neon sign, which is drawn to fit its text |
 | `sprites.png` | the small sprites, decor and mascot, on one sheet; `sprites.yaml` gives each one's `[x, y, width, height]` |
@@ -145,7 +148,8 @@ as the text.
 Board to bridge: `"Hello"` (sent at start and every 3 s until a state arrives) and
 `{"Focus":{"agent":"w1:p2"}}`. `status` is `idle`, `working`, `blocked`, `done`
 or `unknown`. Limits: 250 agents, labels cut to 24 bytes. The board shows
-only workspace labels, with characters outside ASCII as `?`.
+workspace labels on the storeys and agent names on the ticker, with
+characters outside ASCII as `?`.
 
 The board's log output shares the port. Lines that do not start with `{` or `"`
 are logs; the bridge prints them as `board: ...`.
