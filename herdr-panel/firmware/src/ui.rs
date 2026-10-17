@@ -30,6 +30,7 @@ use oxivgl::{
     view::{NavAction, View, register_event_on},
     widgets::{AnimImg, AsLvHandle, Image, Label, LabelLongMode, Obj, WidgetError},
 };
+use static_cell::ConstStaticCell;
 
 use crate::{
     frames::{
@@ -132,8 +133,15 @@ pub struct Panel {
     manual_scroll: Option<Instant>,
     shown: u32,
     /// The latest state from the bridge.
-    state: State,
+    state: &'static mut State,
 }
+
+/// The latest state from the bridge, for the [`Panel`]: a static, built in
+/// place, because a state is too big to build on the render thread's stack
+/// and move.
+static STATE: ConstStaticCell<State> = ConstStaticCell::new(State {
+    agents: herdr_panel_protocol::heapless::Vec::new(),
+});
 
 impl Panel {
     pub fn new() -> Self {
@@ -185,9 +193,7 @@ impl Panel {
             follow: None,
             manual_scroll: None,
             shown: 0,
-            state: State {
-                agents: herdr_panel_protocol::heapless::Vec::new(),
-            },
+            state: STATE.take(),
         }
     }
 
@@ -665,7 +671,7 @@ impl View for Panel {
             self.version = version;
             redraw = true;
         }
-        if let Some(version) = link::newer_into(self.shown, &mut self.state) {
+        if let Some(version) = link::newer_into(self.shown, self.state) {
             self.shown = version;
             self.attention.update(&self.state.agents);
             redraw = true;

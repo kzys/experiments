@@ -33,9 +33,11 @@ pub const PRIO_FLUSH: u32 = 2;
 /// Render thread — yields to everything above it.
 pub const PRIO_RENDER: u32 = 1;
 
-/// Stack for the render thread, where LVGL's draw path runs deep. 20 kB
-/// overflowed, overwriting the statics just below the heap it comes from;
-/// 28 kB has held, but its high-water mark is not measured.
+/// Stack for the render thread, where LVGL's draw path runs deep. Painting
+/// the stack measured it at about 4.5 kB deep, starting up and drawing a
+/// tower of 250 agents; this is kept well above that, as an overflow writes
+/// over the statics just below the heap it comes from, with nothing to catch
+/// it.
 pub const RENDER_STACK: usize = 28 * 1024;
 /// Stack for the flush thread — it only moves bytes to the panel.
 pub const FLUSH_STACK: usize = 8 * 1024;
