@@ -77,17 +77,36 @@ fn desk_under(x: i32, y: i32) -> Option<(usize, usize)> {
     (desk < DESKS_PER_STOREY).then_some((level, desk))
 }
 
+/// A list as long as the tower, in PSRAM.
+type UiVec<T> = Vec<T, &'static esp_alloc::EspHeap>;
+
+/// An empty [`UiVec`].
+fn ui_vec<T>() -> UiVec<T> {
+    Vec::new_in(&crate::UI_HEAP)
+}
+
 /// The widgets built for one state; each is a child of the scroller.
-#[derive(Default)]
 struct Rendered {
-    images: Vec<Image<'static>>,
-    sprites: Vec<AnimImg<'static>>,
-    labels: Vec<Label<'static>>,
+    images: UiVec<Image<'static>>,
+    sprites: UiVec<AnimImg<'static>>,
+    labels: UiVec<Label<'static>>,
     /// The neon sign's halo, legs and board.
-    boxes: Vec<Obj<'static>>,
+    boxes: UiVec<Obj<'static>>,
     /// The agents on each storey above the lobby, by desk, as indices into
     /// the state's agents; `None` at a free desk.
-    storeys: Vec<[Option<u16>; DESKS_PER_STOREY]>,
+    storeys: UiVec<[Option<u16>; DESKS_PER_STOREY]>,
+}
+
+impl Rendered {
+    fn new() -> Self {
+        Self {
+            images: ui_vec(),
+            sprites: ui_vec(),
+            labels: ui_vec(),
+            boxes: ui_vec(),
+            storeys: ui_vec(),
+        }
+    }
 }
 
 pub struct Panel {
@@ -156,7 +175,7 @@ impl Panel {
             down: None,
             car: None,
             car_level: 0,
-            rendered: Rendered::default(),
+            rendered: Rendered::new(),
             loops: Vec::new(),
             plumbob: None,
             awake: None,
@@ -231,9 +250,13 @@ impl Panel {
         let Some(scroller) = &self.scroller else {
             return Ok(());
         };
-        self.rendered = Rendered::default();
-        let mut r = Rendered::default();
-        let spaces: Vec<_> = spaces(&self.state.agents, DESKS_PER_SPACE).collect();
+        self.rendered = Rendered::new();
+        let mut r = Rendered::new();
+        let spaces = {
+            let mut v = ui_vec();
+            v.extend(spaces(&self.state.agents, DESKS_PER_SPACE));
+            v
+        };
         let storeys = spaces.len().div_ceil(SPACES_PER_STOREY);
 
         // Shift everything so the top of the sky above the roof is at 0, and
