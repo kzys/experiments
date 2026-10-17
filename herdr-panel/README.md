@@ -27,9 +27,10 @@ All Rust, apart from the Python scripts that draw the art.
 - `art-tools/`: Python scripts that draw the art: `demo.py` draws a mock-up
   of the whole screen, `export.py` writes the assets from the same drawings.
 - `scene/`: loads the art and puts the tower together on the laptop: desks
-  onto storeys, lamps lit or, at night, the room tinted by moonlight (when
-  every agent there is idle and none has the focus), and the mascot's frames,
-  cut where their desk hides them.
+  into the two spaces of a storey, lamps lit or the space dimmed (when every
+  agent there is idle and none has the focus): in shade by day, tinted by
+  moonlight at night. And the mascot's frames, cut where their desk hides
+  them.
   Also says where everything goes and how fast each animation plays. `cargo run -p
   herdr-panel-scene --example preview -- out.png 2,1,8 [scroll] [time] [hours]`
   draws the screen with workspaces of two, one and eight agents, at a time of
@@ -39,20 +40,26 @@ All Rust, apart from the Python scripts that draw the art.
   runs `agent.focus` when the board asks. It subscribes to herdr's change events
   and also polls every 2 s in case one is missed. It also sends its local time
   whenever the minute changes.
-- `firmware/`: esp-hal and oxivgl. The sky is one still, full-screen image
-  for the time of day by the bridge's clock (night until it sends one): dawn
-  from 5:00, day from 7:00, sunset from 17:00, night from 19:00. By day four
-  clouds drift across it a pixel an hour, placed by the hours since the Unix
-  epoch, so they need no state. The street, lobby and storeys sit in front of it in a
-  container that the arrow buttons scroll a storey at a time (a jump: redrawing
-  the whole screen is too slow to slide). Each workspace (the pane id's part
-  before `:`) takes as many storeys as its agents need; each storey gets a
-  piece of decor at its right end and the workspace's label at its top right,
-  in the 5x8 font, outlined (LVGL fonts that `build.rs` makes from it). Each
-  agent is a mascot looping its frames; a green plumbob bobs over the focused
-  one, the elevator car slides to its storey, and the view jumps there unless
-  an arrow was pressed in the last 10 s. LVGL gets 512 KB of PSRAM on top of its 48 KB
-  internal pool, for the widgets of a tall tower.
+- `firmware/`: esp-hal and oxivgl. The sky is one still, full-screen image for
+  the time of day by the bridge's clock (night until it sends one): dawn from
+  5:00, day from 7:00, sunset from 17:00, night from 19:00. By day four clouds
+  drift across it a pixel an hour, placed by the hours since the Unix epoch,
+  so they need no state. The street, lobby and storeys sit in front of it in a
+  container that the arrow buttons scroll a storey at a time (a jump:
+  redrawing the whole screen is too slow to slide). Each storey holds two
+  spaces of four desks, left and right of a partition. Each workspace (the
+  pane id's part before `:`) takes as many spaces as its agents need, filling
+  them in order, left then right then the next storey up; each space gets the
+  workspace's wallpaper and its label at its top right, and each storey gets a
+  piece of decor at its right end. The label is in the 5x8 font, outlined
+  (LVGL fonts that `build.rs` makes from it). An LED ticker in the lobby names
+  the agents that need you, blocked ones then done ones, each most recent
+  first ("dotfiles: reviewer is waiting - herdr-panel is done"), scrolling
+  when it does not fit, and is blank when nobody needs you. Tapping it focuses
+  the first. Each agent is a mascot looping its frames; a green plumbob bobs
+  over the focused one, the elevator car slides to its storey, and the view
+  jumps there unless an arrow was pressed in the last 10 s. LVGL gets 512 KB
+  of PSRAM on top of its 48 KB internal pool, for the widgets of a tall tower.
   `build.rs` renders the images from `scene/` to PNGs at screen size, converts
   them with LVGL's `LVGLImage.py` and compiles them in.
   Separate from the workspace because it needs the Xtensa toolchain
@@ -79,9 +86,9 @@ halo).
 | `backdrop-dawn.png`, `-day`, `-sunset`, `-night` | the sky at each time of day, with its stars and sun or moon, 320x480; stays still. Dithered, so its gradient does not band |
 | `clouds.png` | the clouds: a row per time of day that has them (dawn, day, sunset), 13 high, each cloud a pixel right of the last, as wide as `CLOUDS` in `scene/src/lib.rs` says |
 | `street.png` | pavement and road below the tower, 320x17 |
-| `lobby.png` | storey 0, 320x36 |
-| `storey-0-dawn.png` .. `storey-3-night.png` | a storey's room, one wallpaper per workspace in turn, its windows showing each time of day's sky, 320x36, with no desks and the lamps off |
-| `roof-on.png`, `roof-off.png` | the roof, its antenna light on and off, 320x22 |
+| `lobby.png` | storey 0, 320x36, with the ticker's board dark |
+| `storey-0-dawn.png` .. `storey-3-night.png` | a storey's room in one wallpaper, with the partition between its two spaces, its windows showing each time of day's sky, 320x36, with no desks and the lamps off; each space takes its half from its workspace's wallpaper in turn |
+| `roof-on.png`, `roof-off.png` | the roof, its antenna light on and off, 320x22, without the neon sign, which is drawn to fit its text |
 | `sprites.png` | the small sprites, decor and mascot, on one sheet; `sprites.yaml` gives each one's `[x, y, width, height]` |
 | `font-5x8.bdf` | the text font: X11's public-domain misc-fixed 5x8, ASCII only; read by the art scripts and `scene` |
 
@@ -135,10 +142,14 @@ only when all announced agents arrived: decoding a whole state at once needs
 several copies of it on the board's stack, which overflowed it. Also bridge to
 board: `{"Clock":{"minute":450,"hour":493838}}` on its own, whenever the
 minute changes: minutes since local midnight, and hours since the Unix epoch.
+And `{"Herdr":{"version":"0.9.3"}}`, herdr's version from its `ping`, when it
+changes: the neon sign on the roof shows it after "HERDR", on a board as wide
+as the text.
 Board to bridge: `"Hello"` (sent at start and every 3 s until a state arrives) and
 `{"Focus":{"agent":"w1:p2"}}`. `status` is `idle`, `working`, `blocked`, `done`
 or `unknown`. Limits: 250 agents, labels cut to 24 bytes. The board shows
-only workspace labels, with characters outside ASCII as `?`.
+workspace labels on the storeys and agent names on the ticker, with
+characters outside ASCII as `?`.
 
 The board's log output shares the port. Lines that do not start with `{` or `"`
 are logs; the bridge prints them as `board: ...`.

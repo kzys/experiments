@@ -9,6 +9,7 @@
 
 pub use heapless;
 use heapless::{String, Vec};
+
 use serde::{Deserialize, Serialize};
 
 /// Most agents the panel shows.
@@ -23,6 +24,9 @@ pub const ID_LEN: usize = 16;
 pub const MAX_LINE: usize = 512;
 
 pub type Label = String<LABEL_LEN>;
+
+/// Longest herdr version, in bytes.
+pub const VERSION_LEN: usize = 16;
 pub type Id = String<ID_LEN>;
 
 /// What herdr reports for an agent.
@@ -123,6 +127,11 @@ pub enum ToBoard {
         minute: u16,
         hour: u32,
     },
+    /// The version of herdr's server, such as `0.9.3`. Sent on its own, when
+    /// it changes.
+    Herdr {
+        version: String<VERSION_LEN>,
+    },
 }
 
 /// The messages that send `state`, in order.
@@ -167,7 +176,7 @@ impl Assembler {
                     self.expected = None;
                 }
             }
-            ToBoard::Clock { .. } => {}
+            ToBoard::Clock { .. } | ToBoard::Herdr { .. } => {}
             ToBoard::End => {
                 let complete = self
                     .expected
@@ -206,23 +215,24 @@ pub fn workspace(id: &str) -> &str {
     id.split(':').next().unwrap_or_default()
 }
 
-/// One storey of the panel's tower: agents of one workspace, in order.
+/// One space of the panel's tower, a few desks of a storey: agents of one
+/// workspace, in order.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub struct Storey<'a> {
+pub struct Space<'a> {
     /// Which workspace this is, counting from 0 in the order they appear;
-    /// storeys of the same workspace share it.
+    /// spaces of the same workspace share it.
     pub workspace: usize,
     pub agents: &'a [Agent],
 }
 
-impl<'a> Storey<'a> {
+impl<'a> Space<'a> {
     /// The workspace's label.
     pub fn label(&self) -> &'a str {
         self.agents.first().map_or("", |a| a.workspace.as_str())
     }
 
-    /// Whether the storey's lights are on: someone there is not idle, or
-    /// has the focus.
+    /// Whether the space's lights are on: someone there is not idle, or has
+    /// the focus.
     pub fn lit(&self) -> bool {
         self.agents
             .iter()
@@ -230,12 +240,12 @@ impl<'a> Storey<'a> {
     }
 }
 
-/// Splits `agents` into storeys of at most `per_storey` agents (at least 1),
-/// one workspace per storey: a workspace with more agents takes several
-/// storeys in a row. Agents of a workspace must be next to each other, as the
+/// Splits `agents` into spaces of at most `per_space` agents (at least 1),
+/// one workspace per space: a workspace with more agents takes several
+/// spaces in a row. Agents of a workspace must be next to each other, as the
 /// bridge sends them.
-pub fn storeys(agents: &[Agent], per_storey: usize) -> impl Iterator<Item = Storey<'_>> {
-    let per_storey = per_storey.max(1);
+pub fn spaces(agents: &[Agent], per_space: usize) -> impl Iterator<Item = Space<'_>> {
+    let per_space = per_space.max(1);
     let mut rest = agents;
     let mut index = 0;
     let mut previous: Option<&str> = None;
@@ -250,14 +260,112 @@ pub fn storeys(agents: &[Agent], per_storey: usize) -> impl Iterator<Item = Stor
             .iter()
             .take_while(|a| workspace(&a.id) == ws)
             .count()
-            .min(per_storey);
-        let (storey, tail) = rest.split_at(run);
+            .min(per_space);
+        let (space, tail) = rest.split_at(run);
         rest = tail;
-        Some(Storey {
+        Some(Space {
             workspace: index,
-            agents: storey,
+            agents: space,
         })
     })
+}
+
+/// How many agents [`Attention`] keeps in order; past that, more are
+/// counted but not named until there is room.
+pub const ATTENTION_LEN: usize = 32;
+/// How many of them the ticker names before saying how many more there are.
+pub const TICKER_SHOWN: usize = 6;
+
+/// Whether `a` needs you: blocked, waiting for you, or done.
+fn needs(a: &Agent) -> bool {
+    matches!(a.status, Status::Blocked | Status::Done)
+}
+
+/// The agents that need you, for the lobby's ticker: those blocked, waiting
+/// for you, and those done. It remembers when each started to, across
+/// states, so the most recent can come first.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct Attention {
+    /// Most recent first.
+    order: Vec<(Id, Status), ATTENTION_LEN>,
+}
+
+impl Attention {
+    pub const fn new() -> Self {
+        Self { order: Vec::new() }
+    }
+
+    /// Takes the latest `agents`: forgets those that no longer need you, and
+    /// puts those that newly do, or now for another reason, first, while
+    /// there is room.
+    pub fn update(&mut self, agents: &[Agent]) {
+        self.order.retain(|(id, status)| {
+            agents
+                .iter()
+                .any(|a| a.id == *id && a.status == *status && needs(a))
+        });
+        for a in agents.iter().filter(|a| needs(a)) {
+            if self.order.is_full() {
+                break;
+            }
+            if !self.order.iter().any(|(id, _)| *id == a.id) {
+                // There is room, and an Id fits its own type.
+                let _ = self.order.insert(0, (a.id.clone(), a.status));
+            }
+        }
+    }
+
+    /// The agents in the order the ticker names them: the blocked ones, then
+    /// the done ones, each most recent first.
+    pub fn ids(&self) -> impl Iterator<Item = &Id> {
+        let of = move |s: Status| self.order.iter().filter(move |(_, st)| *st == s);
+        of(Status::Blocked)
+            .chain(of(Status::Done))
+            .map(|(id, _)| id)
+    }
+
+    /// Writes the ticker's message about `agents`, the state [`update`] last
+    /// took: each agent in [`ids`] order as "workspace: name is waiting" or
+    /// "... is done" (just the workspace when the agent has no name of its
+    /// own), " - " between them, at most [`TICKER_SHOWN`] and then how many
+    /// more; nothing if none needs you.
+    ///
+    /// [`update`]: Self::update
+    /// [`ids`]: Self::ids
+    pub fn write(&self, agents: &[Agent], out: &mut impl core::fmt::Write) -> core::fmt::Result {
+        let total = agents.iter().filter(|a| needs(a)).count();
+        let mut shown = 0;
+        for id in self.ids() {
+            let Some(a) = agents.iter().find(|a| a.id == *id) else {
+                continue;
+            };
+            if shown == TICKER_SHOWN {
+                break;
+            }
+            if shown > 0 {
+                out.write_str(" - ")?;
+            }
+            shown += 1;
+            let ws = if a.workspace.is_empty() {
+                a.id.as_str()
+            } else {
+                a.workspace.as_str()
+            };
+            out.write_str(ws)?;
+            if !a.label.is_empty() && a.label != a.workspace {
+                write!(out, ": {}", a.label)?;
+            }
+            out.write_str(if a.status == Status::Blocked {
+                " is waiting"
+            } else {
+                " is done"
+            })?;
+        }
+        match total {
+            n if n > shown => write!(out, " - {} more", n - shown),
+            _ => Ok(()),
+        }
+    }
 }
 
 #[cfg(test)]
@@ -330,6 +438,16 @@ mod tests {
             serde_json_core::from_str::<ToBoard>(&json).unwrap().0,
             clock
         );
+    }
+
+    #[test]
+    fn herdrs_version_is_one_short_line() {
+        let msg = ToBoard::Herdr {
+            version: truncated("0.9.3"),
+        };
+        let json = serde_json::to_string(&msg).unwrap();
+        assert_eq!(json, r#"{"Herdr":{"version":"0.9.3"}}"#);
+        assert_eq!(serde_json_core::from_str::<ToBoard>(&json).unwrap().0, msg);
     }
 
     #[test]
@@ -452,19 +570,19 @@ mod tests {
     }
 
     fn shape(agents: &[Agent], per: usize) -> std::vec::Vec<(usize, usize)> {
-        storeys(agents, per)
+        spaces(agents, per)
             .map(|s| (s.workspace, s.agents.len()))
             .collect()
     }
 
     #[test]
-    fn each_workspace_gets_a_storey() {
+    fn each_workspace_gets_a_space() {
         let a = agents(&["w1:p1", "w1:p2", "w2:p1", "w3:p4"]);
         assert_eq!(shape(&a, 6), [(0, 2), (1, 1), (2, 1)]);
     }
 
     #[test]
-    fn a_big_workspace_takes_several_storeys() {
+    fn a_big_workspace_takes_several_spaces() {
         let ids: std::vec::Vec<std::string::String> =
             (0..14).map(|i| std::format!("w1:p{i}")).collect();
         let mut a = agents(&ids.iter().map(|s| s.as_str()).collect::<std::vec::Vec<_>>());
@@ -473,31 +591,31 @@ mod tests {
     }
 
     #[test]
-    fn a_full_storey_does_not_spill_into_the_next_workspace() {
+    fn a_full_space_does_not_spill_into_the_next_workspace() {
         let a = agents(&["w1:p1", "w1:p2", "w2:p1"]);
         assert_eq!(shape(&a, 2), [(0, 2), (1, 1)]);
     }
 
     #[test]
-    fn storeys_keep_every_agent_in_order() {
+    fn spaces_keep_every_agent_in_order() {
         let a = agents(&["w1:p1", "w1:p2", "w1:p3", "w2:p1", "w2:p2"]);
-        let flat: std::vec::Vec<&str> = storeys(&a, 2)
+        let flat: std::vec::Vec<&str> = spaces(&a, 2)
             .flat_map(|s| s.agents.iter().map(|a| a.id.as_str()))
             .collect();
         assert_eq!(flat, ["w1:p1", "w1:p2", "w1:p3", "w2:p1", "w2:p2"]);
     }
 
     #[test]
-    fn a_storey_has_its_workspace_label() {
+    fn a_space_has_its_workspace_label() {
         let a = agents(&["w1:p1", "w1:p2", "w2:p1"]);
-        let labels: std::vec::Vec<&str> = storeys(&a, 1).map(|s| s.label()).collect();
+        let labels: std::vec::Vec<&str> = spaces(&a, 1).map(|s| s.label()).collect();
         assert_eq!(labels, ["w1", "w1", "w2"]);
     }
 
     #[test]
-    fn a_storey_is_lit_unless_everyone_idles_unfocused() {
+    fn a_space_is_lit_unless_everyone_idles_unfocused() {
         let mut a = agents(&["w1:p1", "w1:p2"]);
-        let lit = |a: &[Agent]| storeys(a, 6).next().unwrap().lit();
+        let lit = |a: &[Agent]| spaces(a, 6).next().unwrap().lit();
         assert!(!lit(&a));
         a[1].focused = true;
         assert!(lit(&a));
@@ -506,9 +624,77 @@ mod tests {
         assert!(lit(&a));
     }
 
+    fn ticker(att: &Attention, agents: &[Agent]) -> std::string::String {
+        let mut s = std::string::String::new();
+        att.write(agents, &mut s).unwrap();
+        s
+    }
+
     #[test]
-    fn no_agents_no_storeys() {
-        assert_eq!(storeys(&[], 6).count(), 0);
+    fn the_ticker_names_blocked_then_done_agents_newest_first() {
+        let mut a = agents(&["w1:p1", "w1:p2", "w2:p1"]);
+        a[0].label = truncated("reviewer");
+        let mut att = Attention::new();
+        att.update(&a);
+        assert_eq!(ticker(&att, &a), "");
+        a[2].status = Status::Done;
+        att.update(&a);
+        a[1].status = Status::Done;
+        att.update(&a);
+        assert_eq!(ticker(&att, &a), "w1 is done - w2 is done");
+        a[0].status = Status::Blocked;
+        att.update(&a);
+        assert_eq!(
+            ticker(&att, &a),
+            "w1: reviewer is waiting - w1 is done - w2 is done"
+        );
+        let first: std::vec::Vec<&str> = att.ids().map(|id| id.as_str()).collect();
+        assert_eq!(first, ["w1:p1", "w1:p2", "w2:p1"]);
+        // Back to work: off the ticker. Done again later: first among the done.
+        a[1].status = Status::Working;
+        att.update(&a);
+        a[1].status = Status::Done;
+        att.update(&a);
+        assert_eq!(
+            ticker(&att, &a),
+            "w1: reviewer is waiting - w1 is done - w2 is done"
+        );
+        a[2].status = Status::Idle;
+        att.update(&a);
+        assert_eq!(ticker(&att, &a), "w1: reviewer is waiting - w1 is done");
+        // An agent that is gone is forgotten.
+        att.update(&a[..1]);
+        assert_eq!(ticker(&att, &a[..1]), "w1: reviewer is waiting");
+    }
+
+    #[test]
+    fn the_ticker_counts_what_it_does_not_name() {
+        let ids: std::vec::Vec<std::string::String> =
+            (0..40).map(|i| std::format!("w{i}:p1")).collect();
+        let mut a = agents(&ids.iter().map(|s| s.as_str()).collect::<std::vec::Vec<_>>());
+        for x in &mut a {
+            x.status = Status::Done;
+        }
+        let mut att = Attention::new();
+        att.update(&a);
+        assert_eq!(att.ids().count(), ATTENTION_LEN);
+        let t = ticker(&att, &a);
+        assert!(
+            t.ends_with(&std::format!(" - {} more", 40 - TICKER_SHOWN)),
+            "{t}"
+        );
+        assert_eq!(t.matches(" is done").count(), TICKER_SHOWN);
+        // Those it has no room for do not push the others around.
+        let before: std::vec::Vec<Id> = att.ids().cloned().collect();
+        att.update(&a);
+        att.update(&a);
+        let after: std::vec::Vec<Id> = att.ids().cloned().collect();
+        assert_eq!(before, after);
+    }
+
+    #[test]
+    fn no_agents_no_spaces() {
+        assert_eq!(spaces(&[], 6).count(), 0);
     }
 
     #[test]

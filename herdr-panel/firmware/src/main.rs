@@ -2,7 +2,7 @@
 //! FNK0104N and sends tab focus requests over USB serial.
 #![no_std]
 #![no_main]
-#![feature(impl_trait_in_assoc_type, type_alias_impl_trait)]
+#![feature(allocator_api, impl_trait_in_assoc_type, type_alias_impl_trait)]
 
 extern crate alloc;
 
@@ -47,6 +47,14 @@ const LVGL_BUF_BYTES: usize = SCREEN_W as usize * COLOR_BUF_LINES * 2;
 /// PSRAM given to LVGL on top of its small internal pool: a tall tower has
 /// hundreds of widgets. At most `LV_MEM_POOL_EXPAND_SIZE` in `lv_conf.h`.
 const LVGL_PSRAM_POOL: usize = 512 * 1024;
+
+/// The PSRAM that LVGL leaves, for what grows with the tower: the lists of
+/// its widgets. It is not the global heap, which must stay internal RAM:
+/// oxivgl puts LVGL's draw buffers, scratch and event data there, and
+/// atomics allocated there would not work in PSRAM on the ESP32-S3. Each
+/// widget's own list of styles still comes from the global heap; 250
+/// workspaces of one agent fit.
+pub static UI_HEAP: esp_alloc::EspHeap = esp_alloc::EspHeap::empty();
 
 struct DisplayDriver {
     display: St77922,
@@ -155,14 +163,22 @@ async fn main(spawner: Spawner) {
 
     let psram = esp_hal::psram::Psram::new(p.PSRAM, esp_hal::psram::PsramConfig::default());
     let (start, size) = psram.raw_parts();
-    // SAFETY: PSRAM stays mapped for the program's life, and only LVGL uses it.
-    let pool = unsafe {
-        core::slice::from_raw_parts_mut(
-            start as *mut core::mem::MaybeUninit<u8>,
-            size.min(LVGL_PSRAM_POOL),
-        )
-    };
+    let lvgl = size.min(LVGL_PSRAM_POOL);
+    // SAFETY: PSRAM stays mapped for the program's life; LVGL has the start
+    // of it and the heap the rest.
+    let pool =
+        unsafe { core::slice::from_raw_parts_mut(start as *mut core::mem::MaybeUninit<u8>, lvgl) };
     oxivgl::mem::reserve_pool(pool).expect("LVGL PSRAM pool");
+    if size > lvgl {
+        // SAFETY: as above; nothing else uses this part.
+        unsafe {
+            UI_HEAP.add_region(esp_alloc::HeapRegion::new(
+                start.add(lvgl),
+                size - lvgl,
+                esp_alloc::MemoryCapability::External.into(),
+            ));
+        }
+    }
 
     let timg0 = TimerGroup::new(p.TIMG0);
     esp_rtos::start(timg0.timer0, p.FROM_CPU_INTR0);

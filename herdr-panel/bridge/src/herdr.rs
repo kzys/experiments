@@ -69,6 +69,15 @@ impl Herdr {
         Ok(build_state(&agents, &workspaces))
     }
 
+    /// The version of herdr's server, from `ping`.
+    pub fn version(&self) -> Result<String, String> {
+        let pong = self.call("ping", json!({}))?;
+        pong["version"]
+            .as_str()
+            .map(str::to_string)
+            .ok_or_else(|| format!("herdr ping: no version: {pong}"))
+    }
+
     /// Focuses the agent in pane `pane_id` (or an agent name).
     pub fn focus_agent(&self, target: &str) -> Result<(), String> {
         self.call("agent.focus", json!({"target": target}))

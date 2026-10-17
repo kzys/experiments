@@ -32,11 +32,13 @@ def blank():
 
 
 def storey_room(paper):
-    """A storey's room: walls, shaft, wallpaper, windows and unlit lamp
-    fittings, without number, desks or decor."""
+    """A storey's room: walls, shaft, wallpaper, the partition between its
+    spaces, windows and unlit lamp fittings, without number, desks or
+    decor."""
     img = blank()
     top = d["storey_top"](1)
     d["shell"](img, top, d["WALLPAPER"][paper], 1, number=False)
+    d["partition"](img, top)
     for i in range(d["DESKS"]):
         d["window"](img, d["desk_centre"](i), top, paper, i)
     d["lamps"](img, top, False)
