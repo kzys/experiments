@@ -1,0 +1,7 @@
+# Personal Evernote data written by evernote-backup and these scripts.
+en_backup.db*
+export/
+html/
+share-list.txt
+missing-attachments.tsv
+__pycache__/

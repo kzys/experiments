@@ -30,3 +30,11 @@ ROCKNIX: an egui UI driven by the gamepad, with playback through mpv.
 
 See [music/README.md](music/README.md) for what works and how to build and
 install it.
+
+## bye-evernote
+
+Scripts to get everything out of Evernote before cancelling: download the
+account with evernote-backup, export it to ENEX, and convert that to plain
+HTML pages with attachments as ordinary files.
+
+See [bye-evernote/README.md](bye-evernote/README.md) for the steps.
